@@ -120,7 +120,7 @@
   // 为什么要加时间戳：不加的话，浏览器（还有 Service Worker）会把旧版本的代码
   // 缓存起来，你改完代码跑测试，读到的还是老代码，结果对不上会让你查很久。
   // 这是开发用的页面，每次都取最新的最省心。
-  const SCRIPTS = ['../media.js', '../app.js', 'test-runner.js', 'tests.js'];
+  const SCRIPTS = ['../media.js', '../backup.js', '../app.js', 'test-runner.js', 'tests.js'];
 
   const resultsEl = document.getElementById('results');
   const summaryEl = document.getElementById('summary');

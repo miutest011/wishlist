@@ -19,6 +19,8 @@ function setup(data = {}) {
   useMediaProcessor(data.processor || fakeProcessor());
   useConfirm(data.confirm || (() => true));
   useNow(() => new Date(FIXED_NOW));
+  // 导出时别真的弹下载框 / 分享面板。要拿导出的文件，测试里再自己换一个接住它的
+  useFileSaver(() => Promise.resolve());
 
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -334,6 +336,117 @@ test('删除前会问一句，点取消就什么都不动', async () => {
 
   assertEqual(cards(root).length, 1);
   assertEqual(media.files.size, 2);
+});
+
+// ---- 备份 ----
+
+// 把导出的文件接住，而不是真的下载下来
+function captureExport() {
+  const caught = {};
+  useFileSaver((blob, filename) => {
+    caught.blob = blob;
+    caught.filename = filename;
+    return Promise.resolve();
+  });
+  return caught;
+}
+
+test('zip 打包再读回来，字节一模一样（文件名是中文也行）', async () => {
+  const bytes = new Uint8Array([0, 1, 2, 250, 251, 255, 66, 66, 0]);
+  const zip = makeZip([{ name: 'media/照片.jpg', bytes: bytes }]);
+
+  const files = await readZip(zip);
+  assertEqual([...files.keys()], ['media/照片.jpg']);
+  assertEqual([...files.get('media/照片.jpg')], [...bytes], '读回来的内容必须和原来完全一样');
+});
+
+test('备份里装着 wishlist.json、原文件和缩略图', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1', note: '想买这个' })];
+  const { ready } = setup({ items: seeded, media });
+  await ready;
+
+  const caught = captureExport();
+  await exportBackup();
+
+  assert(caught.blob, '应该导出了一个文件');
+  assert(caught.filename.endsWith('.zip'), '导出的应该是 zip：' + caught.filename);
+
+  const files = await readZip(caught.blob);
+  assertEqual(files.size, 3, 'wishlist.json + 原文件 + 缩略图');
+
+  const meta = JSON.parse(new TextDecoder().decode(files.get('wishlist.json')));
+  assertEqual(meta.app, 'wishlist');
+  assertEqual(meta.items.length, 1);
+  assertEqual(meta.items[0].note, '想买这个');
+});
+
+test('导出的备份能在一个全新的空 App 里完整恢复', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1', note: '跑鞋' }), seedItem(media, { id: 'w-2' })];
+  const first = setup({ items: seeded, media });
+  await first.ready;
+
+  dropOnto('w-1', 'w-2');                 // 顺便验文件夹也能跟着恢复
+  const folderId = openFolderId;
+  const caught = captureExport();
+  await exportBackup();
+
+  // 换一个全新的空 App：新存储、新文件仓库，就像换了台手机
+  const freshMedia = createMemoryMediaStore();
+  const second = setup({ media: freshMedia });
+  await second.ready;
+  assertEqual(items.length, 0, '新 App 一开始该是空的');
+
+  await importBackup(new File([caught.blob], '备份.zip', { type: 'application/zip' }));
+
+  assertEqual(items.length, 2, '两条记录都该回来');
+  assertEqual(findItem('w-1').note, '跑鞋');
+  assertEqual(folders.length, 1, '那一叠也该回来');
+  assert(findFolder(folderId), '文件夹的 id 要对得上，照片才知道自己属于哪一叠');
+  assertEqual(itemsIn(folderId).length, 2);
+  assertEqual(freshMedia.files.size, 4, '两条记录 = 两个原文件 + 两个缩略图');
+});
+
+test('再恢复一次不会重复，已经有的会跳过', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, storage, ready } = setup({ items: seeded, media });
+  await ready;
+
+  openBackup();          // 结果提示画在备份页上，所以要先进这一页（真实操作也是这样）
+  const caught = captureExport();
+  await exportBackup();
+  await importBackup(new File([caught.blob], '备份.zip', { type: 'application/zip' }));
+
+  assertEqual(items.length, 2, '不该变成 4 条');
+  assertEqual(JSON.parse(storage.getItem('items')).length, 2);
+  assert(textOf(root, '.backup-status').includes('都已经在了'), '要告诉用户没有重复导入');
+});
+
+test('选错文件时给出提示，现有的东西一点不动', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' })];
+  const { root, ready } = setup({ items: seeded, media });
+  await ready;
+
+  openBackup();
+  await importBackup(new File(['这根本不是 zip'], '乱七八糟.zip', { type: 'application/zip' }));
+
+  assert(textOf(root, '.backup-status').includes('恢复失败'), '要说清楚失败了');
+  assertEqual(items.length, 1, '原来的记录一条都不能少');
+});
+
+test('墙上有备份入口，空着的时候也在（换手机后要靠它恢复）', async () => {
+  const { root, ready } = setup();
+  await ready;
+
+  const entry = root.querySelector('.backup-entry');
+  assert(entry, '墙上该有备份入口');
+
+  click(entry);
+  assertEqual(view, 'backup');
+  assert(root.querySelector('.action-btn'), '备份页该有按钮');
 });
 
 // ---- 项目本身的检查 ----

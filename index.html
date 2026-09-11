@@ -24,6 +24,7 @@
 <!-- media.js 要排在 app.js 前面：app.js 一启动就会用到里面的函数。
      新增脚本时记得同时加进 sw.js 的缓存列表（有测试盯着） -->
 <script src="media.js"></script>
+<script src="backup.js"></script>
 <script src="app.js"></script>
 <script>
   initApp(document.getElementById('app'));

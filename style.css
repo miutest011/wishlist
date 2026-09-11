@@ -398,6 +398,71 @@ button {
   backdrop-filter: blur(24px) saturate(180%);
 }
 
+/* ---- 备份那一页 ---- */
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-entry {
+  flex: none;
+  padding: 6px 12px;
+  margin-bottom: 3px;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-pill);
+}
+
+.backup-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  background: var(--field);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-field);
+}
+
+.backup-block h2 {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.action-btn {
+  width: 100%;
+  padding: 13px 16px;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-field);
+}
+
+.action-btn.primary {
+  color: var(--bg);
+  background: var(--ink);
+  border-color: var(--ink);
+  font-weight: 600;
+}
+
+.action-btn:disabled {
+  opacity: 0.45;
+}
+
+.backup-status {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
 /* ---- 一叠（文件夹）---- */
 /* 后面垫两张纸，露出边角，看上去就是一叠照片摞在一起 */
 .folder-stack {

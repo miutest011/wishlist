@@ -32,6 +32,14 @@ function useNow(newNow) {
   nowFn = newNow;
 }
 
+// 导出备份时「把文件交给用户」这一步。手机上是系统分享面板，电脑上是下载。
+// 测试里换成一个只把文件接住的假函数，免得跑测试时满屏弹下载
+let saveFileFn = shareOrDownloadFile;
+
+function useFileSaver(newSaver) {
+  saveFileFn = newSaver;
+}
+
 // ---- 所有会变化的状态都放在这里，界面完全由它们决定 ----
 // 一条记录长这样：
 //   { id, type: 'image' | 'video', mediaId, thumbId, duration, note, createdAt, folderId }
@@ -49,6 +57,10 @@ let detailId = null;      // 正在看哪一条的详情
 let draft = null;         // 正在添加的那一条（还没保存）
 let errorText = null;     // 出错时显示在底部的提示
 let importing = false;    // 是不是正在处理刚选中的文件
+let backupNote = null;    // 备份页上的结果提示
+let backupBusy = false;   // 正在打包或恢复
+let storageUsed = null;   // 这个 App 占了多少空间（浏览器给的估算）
+let storagePersisted = null;  // 浏览器答没答应「不随便清掉这些数据」
 
 // 图片和视频的临时地址。key 是文件 id（缩略图用 thumbId，大图用 mediaId，
 // 草稿用 'draft'）。存起来复用，否则每次重画都要重新生成，既闪屏又漏内存
@@ -61,6 +73,8 @@ function resetViewState() {
   draft = null;
   errorText = null;
   importing = false;
+  backupNote = null;
+  backupBusy = false;
   suppressNextClick = false;
 }
 
@@ -428,6 +442,142 @@ function deleteItem(id) {
   ]);
 }
 
+// ---- 备份 ----
+
+// 把打包好的文件交给用户。
+// iPhone 上用系统分享面板（里面有「存储到文件」，能存进 iCloud Drive）；
+// 电脑上没有分享面板，退回成普通下载
+function shareOrDownloadFile(blob, filename) {
+  const file = new File([blob], filename, { type: 'application/zip' });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    return navigator.share({ files: [file], title: filename }).catch((error) => {
+      if (error && error.name === 'AbortError') return;   // 用户自己点了取消，不算出错
+      throw error;
+    });
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);   // 等下载真正开始了再回收
+  return Promise.resolve();
+}
+
+function backupFileName() {
+  const now = nowFn();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `心愿单备份-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.zip`;
+}
+
+function openBackup() {
+  view = 'backup';
+  backupNote = null;
+  render();
+  return refreshStorageInfo();
+}
+
+function closeBackup() {
+  view = 'grid';
+  backupNote = null;
+  render();
+}
+
+// 占了多少空间、系统答没答应别清掉。两个都是问浏览器要的，拿不到就不显示
+function refreshStorageInfo() {
+  if (!navigator.storage || !navigator.storage.estimate) return Promise.resolve();
+
+  return navigator.storage.estimate()
+    .then((estimate) => {
+      storageUsed = estimate && estimate.usage ? estimate.usage : 0;
+      return navigator.storage.persisted ? navigator.storage.persisted() : null;
+    })
+    .then((persisted) => {
+      storagePersisted = persisted;
+      render();
+    })
+    .catch(() => undefined);
+}
+
+function exportBackup() {
+  backupBusy = true;
+  backupNote = null;
+  render();
+
+  return buildBackup({
+    items: items,
+    folders: folders,
+    loadFile: (id) => mediaStore.load(id),
+    exportedAt: nowFn().toISOString()
+  }).then((result) => {
+    return Promise.resolve(saveFileFn(result.blob, backupFileName())).then(() => result);
+  }).then((result) => {
+    backupBusy = false;
+    backupNote = result.missing.length > 0
+      ? `打包了 ${result.count} 条，其中 ${result.missing.length} 个文件没找到（那几条的照片可能早就坏了）`
+      : `打包了 ${result.count} 条。存好之后，相册里的原件就可以删了`;
+    render();
+  }).catch((error) => {
+    backupBusy = false;
+    backupNote = '导出失败：' + messageOf(error);
+    render();
+  });
+}
+
+// 恢复是「合并」不是「覆盖」：已经有的记录跳过。
+// 这样误点两次不会重复，也绝不会把现有的东西冲掉
+function importBackup(file) {
+  if (!file) return Promise.resolve();
+
+  backupBusy = true;
+  backupNote = null;
+  render();
+
+  return parseBackup(file).then((backup) => {
+    const existing = new Set(items.map((item) => item.id));
+    const incoming = backup.items.filter((item) => !existing.has(item.id));
+
+    // 先把文件写进去，成功了再记录 —— 顺序反过来会出现「有记录、打不开」的空白格子
+    const jobs = [];
+    incoming.forEach((item) => {
+      const media = backup.files.get(item.mediaId);
+      const thumb = backup.files.get(item.thumbId);
+      if (media) jobs.push(mediaStore.save(item.mediaId, media));
+      if (thumb) jobs.push(mediaStore.save(item.thumbId, thumb));
+    });
+
+    return Promise.all(jobs).then(() => {
+      const known = new Set(folders.map((folder) => folder.id));
+      backup.folders.forEach((folder) => {
+        if (!known.has(folder.id)) folders.push(folder);
+      });
+
+      items = items.concat(incoming);
+      items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : (a.createdAt > b.createdAt ? -1 : 0)));
+      saveItems();
+      saveFolders();
+
+      backupBusy = false;
+      const skipped = backup.items.length - incoming.length;
+      if (incoming.length === 0) {
+        backupNote = '这份备份里的东西都已经在了，没有重复导入';
+      } else {
+        backupNote = `恢复了 ${incoming.length} 条` + (skipped > 0 ? `，跳过 ${skipped} 条已经有的` : '');
+      }
+      render();
+      return loadThumbnails();
+    });
+  }).catch((error) => {
+    backupBusy = false;
+    backupNote = '恢复失败：' + messageOf(error);
+    render();
+  });
+}
+
 // ---- 拖拽：把一张拖到另一张上归到一叠 ----
 // 用指针事件自己实现，因为浏览器自带的 HTML5 拖拽在手机上完全不工作。
 // 手感仿的是 iPhone 桌面挪 App：手机上按住约半秒浮起来跟着手指走，
@@ -642,6 +792,8 @@ function render() {
     appEl.appendChild(renderDetailPage());
   } else if (view === 'folder') {
     appEl.appendChild(renderFolderPage());
+  } else if (view === 'backup') {
+    appEl.appendChild(renderBackupPage());
   } else {
     appEl.appendChild(renderGridPage());
   }
@@ -755,6 +907,7 @@ function renderGridPage() {
   titles.appendChild(element('h1', '', '心愿单'));
   titles.appendChild(element('p', 'count', items.length + ' 件种草'));
   bar.appendChild(titles);
+  bar.appendChild(button('backup-entry', '备份', openBackup));
   page.appendChild(bar);
 
   const entries = wallEntries();
@@ -810,6 +963,74 @@ function renderFolderPage() {
   const picker = renderPicker();
   page.appendChild(picker);
   page.appendChild(renderAddButton(picker));
+  return page;
+}
+
+function renderBackupPage() {
+  const page = element('div', 'page sheet');
+
+  const bar = element('header', 'sheet-bar');
+  bar.appendChild(button('text-btn', '返回', closeBackup));
+  bar.appendChild(element('span', 'sheet-title', '备份'));
+  bar.appendChild(element('span', 'folder-count-badge', ''));   // 占位，让标题居中
+  page.appendChild(bar);
+
+  const body = element('div', 'sheet-body');
+
+  body.appendChild(element(
+    'p',
+    'hint',
+    '照片和视频是复制进这个 App 的，相册里删掉之后，这里就是唯一的一份。' +
+    '导出一份备份存到「文件」App 或 iCloud Drive，才算真的保住了。'
+  ));
+
+  const exportBlock = element('div', 'backup-block');
+  exportBlock.appendChild(element('h2', '', '导出备份'));
+  exportBlock.appendChild(element(
+    'p',
+    'hint',
+    '打包成一个 zip：所有照片、视频、备注和文件夹都在里面。' +
+    '在电脑上双击就能打开，里面就是一张张照片。'
+  ));
+  const exportButton = button('action-btn primary', backupBusy ? '正在处理……' : '导出 ' + items.length + ' 条', exportBackup);
+  exportButton.disabled = backupBusy || items.length === 0;
+  exportBlock.appendChild(exportButton);
+  body.appendChild(exportBlock);
+
+  const importBlock = element('div', 'backup-block');
+  importBlock.appendChild(element('h2', '', '从备份恢复'));
+  importBlock.appendChild(element(
+    'p',
+    'hint',
+    '选一个之前导出的 zip。已经有的记录会自动跳过，不会重复，也不会覆盖现在的东西。'
+  ));
+
+  const picker = element('input', 'backup-picker');
+  picker.type = 'file';
+  picker.accept = '.zip,application/zip';
+  picker.hidden = true;
+  picker.addEventListener('change', () => {
+    const file = picker.files && picker.files[0];
+    picker.value = '';
+    importBackup(file);
+  });
+  importBlock.appendChild(picker);
+
+  const importButton = button('action-btn', '选择备份文件', () => picker.click());
+  importButton.disabled = backupBusy;
+  importBlock.appendChild(importButton);
+  body.appendChild(importBlock);
+
+  if (backupNote) body.appendChild(element('p', 'backup-status', backupNote));
+
+  if (storageUsed !== null) {
+    const persisted = storagePersisted === true
+      ? '系统已经答应不随便清掉这些数据'
+      : '系统还没答应「不随便清掉这些数据」，更要留一份备份';
+    body.appendChild(element('p', 'hint', '现在占用 ' + formatSize(storageUsed) + ' · ' + persisted));
+  }
+
+  page.appendChild(body);
   return page;
 }
 
