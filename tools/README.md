@@ -49,6 +49,7 @@
 | 文件 | 作用 |
 |---|---|
 | `test.html` | 测试页面，打开它就会自动跑所有测试并显示结果 |
+| `gallery.html` | 样板页：一页看全所有组件的所有状态，浅色深色并排。**调样式时打开它** |
 | `test-runner.js` | 极简测试框架：`test()` 登记测试、`assert()` / `assertEqual()` 断言、`skip()` 跳过、`createMemoryStorage()` 和 `createMemoryMediaStore()` 提供假存储、连跑两遍比对结果 |
 | `tests.js` | 心愿单的所有测试，以及 `setup()`、`click()` 这些公共工具 |
 | `dev-server.py` | 本地开发服务器（不缓存任何文件） |

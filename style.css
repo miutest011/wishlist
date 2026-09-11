@@ -1,31 +1,94 @@
-/* 心愿单的样式。整体是「一面贴满拍立得的墙」：两列、白边相框、每张微微歪一点。 */
+/* 心愿单的样式。
+ *
+ * ====== 设计规则 ======
+ * 改样式只改下面这组变量，别在具体组件里写死颜色和数值 ——
+ * 这样改完一处，全页跟着变，也不会出现「这里改了那里没改」。
+ * 改完打开 tools/gallery.html，一屏就能看出哪里坏了。
+ *
+ * 底色：干净的白。照片是主角，界面本身尽量不出声音。
+ * 颜色：只用黑白灰。没有主题色 —— 一有彩色按钮就显得廉价，
+ *       真正需要提示的地方（删除）才用一点红。
+ * 相框：白纸 + 极淡的描边 + 柔和的影子。白底上全靠影子把照片托起来。
+ * 倾斜：最多 2.5 度。再多就像贴纸墙，不够高级。
+ * 悬浮控件：半透明白 + 毛玻璃，下面的内容要能隐约透出来。
+ *
+ * 深色模式的颜色在两个地方各写了一份（跟随系统的、以及样板页手动指定的），
+ * 改一处就要改另一处 —— 有测试盯着，漏了会报红。
+ */
 
 :root {
-  --wall: #EDEFE9;          /* 墙面 */
-  --ink: #1B201C;
-  --muted: #6B746D;
-  --line: #D8DCD3;
-  --accent: #2F6F45;        /* 种草绿，＋ 按钮和「完成」用它 */
-  --accent-ink: #FFFFFF;
-  --danger: #B3372C;
-  --polaroid: #FCFCF9;      /* 相框的白 */
-  --photo-bg: #E3E5DE;      /* 图还没读出来时的底色 */
-  --shadow: rgba(27, 32, 28, 0.16);
+  /* 颜色 */
+  --bg: #FFFFFF;              /* 底色 */
+  --ink: #1B1B19;             /* 主要文字 */
+  --ink-2: #6C6C66;           /* 次要文字 */
+  --muted: #9B9B94;           /* 提示文字、占位符 */
+  --hairline: rgba(0, 0, 0, 0.09);   /* 极淡的描边 */
+  --frame: #FFFFFF;           /* 相框的纸 */
+  --photo-bg: #F2F2EF;        /* 照片还没读出来时的底色 */
+  --field: #FAFAF8;           /* 输入框 */
+  --glass: rgba(255, 255, 255, 0.72);        /* 毛玻璃控件 */
+  --glass-line: rgba(0, 0, 0, 0.08);
+  --danger: #B3392C;
+  --scrim: rgba(28, 28, 26, 0.28);           /* 处理中的遮罩 */
+  --toast: #26261F;                          /* 出错提示的深色底 */
+
+  /* 影子：近处一层实的 + 远处一层散的，比单层更像真的纸 */
+  --shadow-card: 0 1px 2px rgba(20, 20, 18, 0.07), 0 10px 24px rgba(20, 20, 18, 0.07);
+  --shadow-float: 0 1px 3px rgba(20, 20, 18, 0.10), 0 8px 28px rgba(20, 20, 18, 0.14);
+
+  /* 圆角 */
+  --radius-frame: 4px;        /* 相框：几乎是直角，照片纸就是这样 */
+  --radius-field: 12px;
+  --radius-pill: 999px;
+
+  /* 间距 */
+  --gap-wall: 22px 16px;      /* 墙上两张照片之间 */
+  --pad-page: 20px;
+
+  /* 字 */
+  --font-body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* 标题用系统自带的手札体，带点手写感。手机和 Mac 都有，不用下载、离线也在。
+     想换成别的（圆体、翩翩体），先去 tools/gallery.html 里比一比 */
+  --font-title: "HanziPen SC", "PingFang SC", var(--font-body);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --wall: #141714;
-    --ink: #E7EBE4;
-    --muted: #99A29A;
-    --line: #2B312B;
-    --accent: #86C79A;
-    --accent-ink: #0D1A11;
-    --danger: #E9827A;
-    --polaroid: #EFEDE7;    /* 相框还是浅色，深色背景上更像照片 */
-    --photo-bg: #CFCEC8;
-    --shadow: rgba(0, 0, 0, 0.55);
+  :root:not([data-theme="light"]) {
+    --bg: #0F0F0E;
+    --ink: #F1F1ED;
+    --ink-2: #A8A8A1;
+    --muted: #82827B;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --frame: #F6F5F1;
+    --photo-bg: #DAD9D3;
+    --field: #1B1B19;
+    --glass: rgba(255, 255, 255, 0.16);
+    --glass-line: rgba(255, 255, 255, 0.24);
+    --danger: #E98A80;
+    --scrim: rgba(0, 0, 0, 0.5);
+    --toast: #2E2E28;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 26px rgba(0, 0, 0, 0.45);
+    --shadow-float: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 28px rgba(0, 0, 0, 0.55);
   }
+}
+
+/* 样板页用它来并排展示深色效果。上面那一份改了，这一份要跟着改 */
+[data-theme="dark"] {
+  --bg: #0F0F0E;
+  --ink: #F1F1ED;
+  --ink-2: #A8A8A1;
+  --muted: #82827B;
+  --hairline: rgba(255, 255, 255, 0.14);
+  --frame: #F6F5F1;
+  --photo-bg: #DAD9D3;
+  --field: #1B1B19;
+  --glass: rgba(255, 255, 255, 0.16);
+  --glass-line: rgba(255, 255, 255, 0.24);
+  --danger: #E98A80;
+  --scrim: rgba(0, 0, 0, 0.5);
+  --toast: #2E2E28;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 26px rgba(0, 0, 0, 0.45);
+  --shadow-float: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 28px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -33,14 +96,14 @@
 }
 
 html {
-  background: var(--wall);   /* 滑到头回弹时露出来的也是墙面色 */
+  background: var(--bg);   /* 滑到头回弹时露出来的也是底色 */
 }
 
 body {
   margin: 0;
-  background: var(--wall);
+  background: var(--bg);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -54,8 +117,8 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
 }
 
 /* 刘海屏：左右和顶部留出安全区，底部留给 ＋ 按钮 */
@@ -66,19 +129,22 @@ button {
 
 /* ---- 顶部标题 ---- */
 .topbar {
-  padding: 14px 20px 10px;
+  padding: 18px var(--pad-page) 12px;
 }
 
 .topbar h1 {
   margin: 0;
+  font-family: var(--font-title);
   font-size: 30px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-weight: 600;
+  letter-spacing: 0.06em;   /* 圆体挤在一起会糊，松一点更好看 */
+  line-height: 1.25;
 }
 
 .count {
-  margin: 2px 0 0;
-  font-size: 13px;
+  margin: 3px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.04em;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -87,23 +153,24 @@ button {
 .wall {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px 14px;
-  padding: 10px 18px calc(120px + env(safe-area-inset-bottom));
+  gap: var(--gap-wall);
+  padding: 10px var(--pad-page) calc(130px + env(safe-area-inset-bottom));
 }
 
 .card {
   margin: 0;
-  padding: 7px 7px 22px;      /* 下边留宽一点，就是拍立得的样子 */
-  background: var(--polaroid);
-  border-radius: 3px;
-  box-shadow: 0 3px 12px var(--shadow);
+  padding: 6px 6px 20px;      /* 下边留宽一点，就是拍立得的样子 */
+  background: var(--frame);
+  border: 0.5px solid var(--hairline);   /* 白底上没有这条线，相框会糊进背景 */
+  border-radius: var(--radius-frame);
+  box-shadow: var(--shadow-card);
   transform: rotate(var(--rot, 0deg));
-  transition: transform 140ms ease;
+  transition: transform 160ms ease;
   user-select: none;
 }
 
 .card:active {
-  transform: rotate(0deg) scale(0.97);
+  transform: rotate(0deg) scale(0.975);
 }
 
 .photo {
@@ -123,59 +190,66 @@ button {
 /* 视频右下角的时长 */
 .badge {
   position: absolute;
-  right: 6px;
-  bottom: 5px;
+  right: 7px;
+  bottom: 6px;
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
   font-variant-numeric: tabular-nums;
 }
 
 .badge-play {
-  font-size: 9px;
+  font-size: 8px;
 }
 
 /* ---- 一条都没有的时候 ---- */
 .empty {
-  padding: 22vh 32px 0;
+  padding: 24vh 32px 0;
   text-align: center;
 }
 
 .empty-title {
   margin: 0;
+  font-family: var(--font-title);
   font-size: 17px;
   font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .empty-hint {
-  margin: 6px 0 0;
-  font-size: 14px;
+  margin: 8px 0 0;
+  font-size: 13.5px;
   color: var(--muted);
 }
 
-/* ---- 底部的 ＋ ---- */
+/* ---- 底部悬浮的 ＋ ---- */
 .fab {
   position: fixed;
   left: 50%;
-  bottom: calc(26px + env(safe-area-inset-bottom));
-  width: 58px;
-  height: 58px;
+  bottom: calc(30px + env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
   transform: translateX(-50%);
-  border: 0;
+  color: var(--ink);
+  background: var(--glass);
+  border: 0.5px solid var(--glass-line);
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: 26px;
-  line-height: 1;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-float);
+  /* 毛玻璃：照片从下面隐约透上来。不支持的浏览器就是一个半透明的白圆 */
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  transition: transform 160ms ease;
 }
 
 .fab:active {
-  transform: translateX(-50%) scale(0.94);
+  transform: translateX(-50%) scale(0.93);
 }
 
 /* ---- 写备注 / 看详情 ---- */
@@ -187,26 +261,30 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px;
-  background: var(--wall);
-  border-bottom: 1px solid var(--line);
+  padding: 12px 12px;
+  background: var(--glass);
+  border-bottom: 0.5px solid var(--hairline);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
 }
 
 .sheet-title {
+  font-family: var(--font-title);
   font-size: 15px;
   font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .text-btn {
   border: 0;
   background: transparent;
-  padding: 6px 8px;
-  font-size: 16px;
-  color: var(--muted);
+  padding: 6px 10px;
+  font-size: 15px;
+  color: var(--ink-2);
 }
 
 .text-btn.primary {
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -217,22 +295,23 @@ button {
 .sheet-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px 20px calc(40px + env(safe-area-inset-bottom));
+  gap: 18px;
+  padding: 24px var(--pad-page) calc(40px + env(safe-area-inset-bottom));
 }
 
 .card.preview {
-  width: min(300px, 78%);
+  width: min(290px, 76%);
   align-self: center;
 }
 
 .detail-media {
   display: grid;
   place-items: center;
-  background: var(--polaroid);
+  padding: 6px;
+  background: var(--frame);
+  border: 0.5px solid var(--hairline);
   border-radius: 6px;
-  padding: 8px;
-  box-shadow: 0 3px 12px var(--shadow);
+  box-shadow: var(--shadow-card);
 }
 
 .detail-media img,
@@ -246,13 +325,13 @@ button {
 
 .note-input {
   width: 100%;
-  min-height: 96px;
-  padding: 12px 14px;
+  min-height: 92px;
+  padding: 13px 14px;
   font: inherit;
-  color: inherit;
-  background: var(--polaroid);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  color: var(--ink);
+  background: var(--field);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-field);
   resize: vertical;
 }
 
@@ -271,28 +350,28 @@ button {
   position: fixed;
   left: 16px;
   right: 16px;
-  bottom: calc(100px + env(safe-area-inset-bottom));
+  bottom: calc(104px + env(safe-area-inset-bottom));
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 13px 15px;
   font-size: 14px;
   line-height: 1.5;
-  color: #fff;
-  background: #33382F;
-  border-radius: 12px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  color: #F5F5F0;
+  background: var(--toast);
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
 }
 
 .error-close {
   flex: none;
   border: 0;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
   padding: 6px 12px;
-  border-radius: 999px;
   font-size: 13px;
+  color: #F5F5F0;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-pill);
 }
 
 /* ---- 处理中 ---- */
@@ -302,16 +381,21 @@ button {
   z-index: 6;
   display: grid;
   place-items: center;
-  background: rgba(20, 23, 20, 0.35);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 
 .busy-card {
-  padding: 14px 22px;
+  padding: 14px 24px;
   font-size: 15px;
   color: var(--ink);
-  background: var(--polaroid);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  background: var(--glass);
+  border: 0.5px solid var(--glass-line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
 }
 
 @media (prefers-reduced-motion: reduce) {

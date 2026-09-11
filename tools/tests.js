@@ -311,6 +311,47 @@ test('删除前会问一句，点取消就什么都不动', async () => {
 
 // ---- 项目本身的检查 ----
 
+// 从 style.css 里把某个选择器下面定义的颜色变量读出来，
+// 例如 readTokens(css, '[data-theme="dark"]') → { '--bg': '#0F0F0E', … }
+function readTokens(cssText, selector) {
+  const start = cssText.indexOf(selector);
+  if (start === -1) return null;
+
+  const open = cssText.indexOf('{', start);
+  const close = cssText.indexOf('}', open);
+  if (open === -1 || close === -1) return null;
+
+  const pairs = [...cssText.slice(open + 1, close).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)]
+    .map((match) => [match[1], match[2].trim()])
+    .sort((a, b) => a[0].localeCompare(b[0]));   // 排序，比较时不受书写顺序影响
+
+  const tokens = {};
+  pairs.forEach(([name, value]) => { tokens[name] = value; });
+  return tokens;
+}
+
+test('深色模式的两份颜色定义完全一致', async () => {
+  // 深色的颜色在 style.css 里写了两遍：一份跟随系统，一份给样板页手动指定。
+  // 改一处漏一处的话，样板页上看着好好的，真机深色模式里却是坏的
+  if (location.protocol === 'file:') skip('本地文件模式读不了项目文件');
+
+  const css = await fetch('../style.css?t=' + Date.now()).then((r) => r.text());
+  const followSystem = readTokens(css, ':root:not([data-theme="light"])');
+  const forGallery = readTokens(css, '[data-theme="dark"] {');
+
+  assert(followSystem && Object.keys(followSystem).length > 5, '没读到「跟随系统」那份深色定义');
+  assertEqual(forGallery, followSystem, '两份深色定义对不上，改颜色时漏了一处');
+});
+
+test('＋ 按钮是画出来的图标，并且带无障碍标签', async () => {
+  const { root, ready } = setup();
+  await ready;
+
+  const fab = root.querySelector('.fab');
+  assertEqual(fab.getAttribute('aria-label'), '添加种草');
+  assert(fab.querySelector('svg'), '加号应该是画的，不是「＋」这个字');
+});
+
 test('index.html 里加载的脚本，sw.js 的缓存列表里都有', async () => {
   // 双击打开测试页时（file://）浏览器不让读项目文件，只能跳过
   if (location.protocol === 'file:') skip('本地文件模式读不了项目文件');

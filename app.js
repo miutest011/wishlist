@@ -273,7 +273,7 @@ function rotationFor(id) {
   for (let i = 0; i < id.length; i++) {
     hash = (hash * 31 + id.charCodeAt(i)) % 100000;
   }
-  return ((hash % 81) / 10 - 4).toFixed(1) + 'deg';   // -4.0 ~ +4.0 度
+  return ((hash % 51) / 10 - 2.5).toFixed(1) + 'deg';   // -2.5 ~ +2.5 度
 }
 
 // 1536000 → 1.5 MB
@@ -293,6 +293,27 @@ function element(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// 悬浮按钮上的加号。用画的而不是打「＋」这个字，
+// 因为字体里的加号又粗又不居中，放大了很明显
+function plusIcon() {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const path = document.createElementNS(namespace, 'path');
+  path.setAttribute('d', 'M12 5.5v13M5.5 12h13');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.6');
+  path.setAttribute('stroke-linecap', 'round');
+
+  svg.appendChild(path);
+  return svg;
 }
 
 function button(className, text, onClick) {
@@ -394,7 +415,10 @@ function renderGridPage() {
   });
   page.appendChild(picker);
 
-  page.appendChild(button('fab', '＋', () => picker.click()));
+  const add = button('fab', '', () => picker.click());
+  add.setAttribute('aria-label', '添加种草');
+  add.appendChild(plusIcon());   // 画出来的加号比「＋」这个字更细、更匀
+  page.appendChild(add);
   return page;
 }
 

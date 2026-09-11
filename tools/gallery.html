@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>样板页 - 心愿单</title>
+
+<!-- 用的就是 App 真正的样式表。所以这页显示成什么样，App 里就是什么样 -->
+<link rel="stylesheet" href="../style.css?t=0">
+
+<style>
+  /* 下面这些只属于样板页本身，不会影响 App */
+  body {
+    background: #E8E8E4;
+    padding: 32px 24px 64px;
+  }
+
+  .sheet-head {
+    max-width: 1100px;
+    margin: 0 auto 28px;
+  }
+
+  .sheet-head h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .sheet-head p {
+    margin: 0;
+    max-width: 42em;
+    font-size: 14px;
+    line-height: 1.7;
+    color: #55554F;
+  }
+
+  section {
+    max-width: 1100px;
+    margin: 0 auto 40px;
+  }
+
+  h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #33332E;
+  }
+
+  .section-hint {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #6B6B64;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  /* 一块「屏幕」。App 里 ＋ 按钮和提示条是钉在屏幕上的（position: fixed），
+     放进样板页要改成钉在这块板子上，否则它们会飘到整页的底部 */
+  .board {
+    position: relative;
+    width: 320px;
+    height: 540px;
+    overflow: hidden;
+    background: var(--bg);
+    /* 必须写这一行：文字颜色是从 body 继承下来的「算好的颜色」，
+       不会因为这块板子里把 --ink 换成了深色版就跟着变。
+       真机上整页共用一个主题，不会有这个问题，只有样板页要补 */
+    color: var(--ink);
+    border-radius: 20px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 12px 30px rgba(0, 0, 0, 0.12);
+  }
+
+  .board .page {
+    min-height: 100%;
+  }
+
+  .board .fab,
+  .board .error-banner,
+  .board .busy {
+    position: absolute;
+  }
+
+  .board .busy {
+    inset: 0;
+  }
+
+  .board-label {
+    margin: 10px 2px 0;
+    font-size: 12.5px;
+    color: #55554F;
+  }
+
+  .board-label b {
+    color: #262622;
+  }
+
+  .pair {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 字体候选 */
+  .font-card {
+    width: 250px;
+    padding: 18px 20px 20px;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  .font-card .sample {
+    font-size: 32px;
+    letter-spacing: 0.06em;
+    color: #1B1B19;
+  }
+
+  .font-card .sample-small {
+    margin-top: 6px;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    color: #4A4A45;
+  }
+
+  .font-card .name {
+    margin-top: 14px;
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #6B6B64;
+  }
+
+  /* 颜色 */
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+    padding: 16px;
+    background: var(--bg);
+    border-radius: 14px;
+  }
+
+  .swatch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  .chip {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    border-radius: 7px;
+    border: 0.5px solid var(--hairline);
+  }
+
+  .chip-name {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: var(--ink);
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet-head">
+  <h1>样板页</h1>
+  <p>
+    一页看全所有组件的所有状态，浅色深色并排。改完 <code>style.css</code> 里的变量，
+    刷新这页扫一眼就知道有没有改坏 —— 不用在 App 里到处点。
+    这里的每块屏幕都是用 App 真正的代码画出来的，不是照着做的假页面，所以不会和 App 走偏。
+    照片是现画的占位图。
+  </p>
+</div>
+
+<section>
+  <h2>标题字体候选</h2>
+  <p class="section-hint">
+    都是 iPhone 和 Mac 自带的中文字体，不用下载、离线也在。
+    现在用的是圆体。想换哪个，把 <code>style.css</code> 里的 <code>--font-title</code> 改掉就行。
+  </p>
+  <div class="row" id="fonts"></div>
+</section>
+
+<section>
+  <h2>颜色</h2>
+  <p class="section-hint">全是黑白灰，只有「删除」用一点红。左边浅色，右边深色。</p>
+  <div class="row">
+    <div class="pair">
+      <div class="swatches" id="swatches-light"></div>
+      <p class="board-label"><b>浅色</b></p>
+    </div>
+    <div class="pair">
+      <div class="swatches" data-theme="dark" id="swatches-dark"></div>
+      <p class="board-label"><b>深色</b></p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>组件状态</h2>
+  <p class="section-hint">每种状态浅色深色各一块。静态展示，点不动。</p>
+  <div class="row" id="boards"></div>
+</section>
+
+<script src="../media.js?t=0"></script>
+<script src="../app.js?t=0"></script>
+<script src="test-runner.js?t=0"></script>
+<script>
+  // ---- 占位照片：现画几张，避免依赖外部图片 ----
+  const PALETTES = [
+    ['#F4DCCB', '#E6B59B'], ['#D9E4EE', '#AFC4D8'], ['#DDEBD5', '#B3CFA3'],
+    ['#F6D5DA', '#E7A9B3'], ['#EFE1D1', '#D5B894'], ['#E2E2DC', '#BDBDB3']
+  ];
+
+  function drawPhoto(index) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 600;
+    const pen = canvas.getContext('2d');
+    const colors = PALETTES[index % PALETTES.length];
+    const gradient = pen.createLinearGradient(0, 0, 600, 600);
+    gradient.addColorStop(0, colors[0]);
+    gradient.addColorStop(1, colors[1]);
+    pen.fillStyle = gradient;
+    pen.fillRect(0, 0, 600, 600);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  }
+
+  const PHOTOS = PALETTES.map((_, index) => drawPhoto(index));
+
+  function photoBlob(index) {
+    return fetch(PHOTOS[index % PHOTOS.length]).then((response) => response.blob());
+  }
+
+  // ---- 造一块屏幕 ----
+  // 做法：让真正的 App 在一个临时元素里跑起来，摆成想要的状态，
+  // 再把画好的内容复制进板子里。复制过来的是静态的，点不动 —— 样板页只给眼睛看。
+  async function board(title, note, arrange) {
+    const storage = createMemoryStorage();
+    useStorage(storage);
+    const media = createMemoryMediaStore();
+    useMediaStore(media);
+    useConfirm(() => true);
+    useMediaProcessor(async (file) => ({
+      type: (file.type || '').startsWith('video/') ? 'video' : 'image',
+      thumb: await photoBlob(0),
+      width: 900,
+      height: 1200,
+      duration: (file.type || '').startsWith('video/') ? 34.2 : null
+    }));
+
+    const stage = document.createElement('div');
+    stage.style.cssText = 'position:absolute;left:-9999px;top:0;width:320px;';
+    document.body.appendChild(stage);
+
+    await initApp(stage);
+    await arrange({ storage, media, stage });
+
+    const markup = stage.innerHTML;
+    stage.remove();
+
+    ['light', 'dark'].forEach((theme) => {
+      const pair = document.createElement('div');
+      pair.className = 'pair';
+
+      const screen = document.createElement('div');
+      screen.className = 'board';
+      screen.dataset.theme = theme;
+      screen.innerHTML = markup;
+
+      // App 里图片用的是临时地址（createObjectURL），下一块屏幕一初始化就被回收了，
+      // 所以这里换成画好的占位图，板子才不会变白
+      screen.querySelectorAll('img').forEach((image, index) => {
+        image.src = PHOTOS[index % PHOTOS.length];
+      });
+
+      pair.appendChild(screen);
+      const label = document.createElement('p');
+      label.className = 'board-label';
+      label.innerHTML = '<b>' + title + '</b>（' + (theme === 'light' ? '浅色' : '深色') + '）<br>' + note;
+      pair.appendChild(label);
+
+      document.getElementById('boards').appendChild(pair);
+    });
+  }
+
+  // 造几条已经存在的记录
+  async function seed(storage, media, count) {
+    const list = [];
+    for (let index = 0; index < count; index++) {
+      const id = 'w-' + index;
+      list.push({
+        id: id,
+        type: index === 1 ? 'video' : 'image',
+        mediaId: 'media-' + id,
+        thumbId: 'thumb-' + id,
+        duration: index === 1 ? 34.2 : null,
+        note: index === 0 ? '双十一再看看' : '',
+        createdAt: '2026-09-11T10:00:00.000Z',
+        folderId: null
+      });
+      const blob = await photoBlob(index);
+      media.files.set('media-' + id, blob);
+      media.files.set('thumb-' + id, blob);
+    }
+    storage.setItem('items', JSON.stringify(list));
+  }
+
+  function fakeFile(type = 'image/jpeg') {
+    return new File(['内容'], 'sample', { type: type });
+  }
+
+  // ---- 字体候选 ----
+  // 字体名用单引号包起来 —— 下面要塞进 style="…" 这个双引号属性里，
+  // 用双引号会把属性提前截断，四张卡片就都变成同一个字体了
+  const FONT_CANDIDATES = [
+    { css: "'Yuanti SC'", name: '圆体（现在用的）', note: '圆润、整齐，最不容易出错' },
+    { css: "'HanziPen SC'", name: '手札体', note: '手写感，最俏皮，笔画细' },
+    { css: "'Hannotate SC'", name: '翩翩体', note: '手写感，比手札体端正一些' },
+    { css: "'PingFang SC'", name: '苹方（系统默认）', note: '最中性，没有个性' }
+  ];
+
+  FONT_CANDIDATES.forEach((font) => {
+    const card = document.createElement('div');
+    card.className = 'font-card';
+    card.innerHTML =
+      '<div class="sample" style="font-family:' + font.css + ', sans-serif">心愿单</div>' +
+      '<div class="sample-small" style="font-family:' + font.css + ', sans-serif">还没有种草 · 6 件</div>' +
+      '<div class="name"><b>' + font.name + '</b><br>' + font.note + '</div>';
+    document.getElementById('fonts').appendChild(card);
+  });
+
+  // ---- 颜色 ----
+  const TOKENS = [
+    '--bg', '--ink', '--ink-2', '--muted', '--hairline',
+    '--frame', '--photo-bg', '--field', '--glass', '--danger'
+  ];
+
+  ['light', 'dark'].forEach((theme) => {
+    const box = document.getElementById('swatches-' + theme);
+    const styles = getComputedStyle(box);
+    TOKENS.forEach((token) => {
+      const value = styles.getPropertyValue(token).trim();
+      const row = document.createElement('div');
+      row.className = 'swatch';
+      row.innerHTML =
+        '<span class="chip" style="background:' + value + '"></span>' +
+        '<span><span class="chip-name">' + token + '</span><br>' + value + '</span>';
+      box.appendChild(row);
+    });
+  });
+
+  // ---- 所有状态 ----
+  (async function () {
+    await board('空状态', '第一次打开，一条都没有', async () => undefined);
+
+    await board('拍立得墙', '6 条记录，第二条是视频', async ({ storage, media, stage }) => {
+      await seed(storage, media, 6);
+      await initApp(stage);
+    });
+
+    await board('写备注', '选完照片，还没点完成', async () => {
+      await importFile(fakeFile());
+    });
+
+    await board('看详情', '点开一条，能改备注、能删', async ({ storage, media, stage }) => {
+      await seed(storage, media, 1);
+      await initApp(stage);
+      await openDetail('w-0');
+    });
+
+    await board('出错', '文件读不出来、或者空间不够时', async () => {
+      useMediaProcessor(() => Promise.reject(new Error('这个格式不支持')));
+      await importFile(fakeFile());
+    });
+
+    await board('处理中', '正在生成缩略图，视频会慢一点', async () => {
+      useMediaProcessor(() => new Promise(() => undefined));   // 永远不结束，停在这个状态
+      importFile(fakeFile());
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+  })();
+</script>
+
+</body>
+</html>
