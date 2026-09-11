@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<!-- 这是开发用的页面，别让浏览器缓存它本身 -->
+<meta http-equiv="Cache-Control" content="no-store">
+<title>测试 - 心愿单</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+    color: #333;
+  }
+
+  h1 {
+    font-size: 20px;
+  }
+
+  .hint {
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: #999;
+  }
+
+  .summary {
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 10px;
+  }
+
+  .summary.pass {
+    color: #2e7d32;
+    background: #edf7ee;
+  }
+
+  .summary.fail {
+    color: #c62828;
+    background: #fdecea;
+  }
+
+  .result {
+    padding: 8px 12px;
+    margin-bottom: 4px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+
+  .result.pass {
+    color: #4a7c50;
+    background: #fafcfa;
+  }
+
+  .result.fail {
+    color: #c62828;
+    background: #fdecea;
+  }
+
+  .result.warn {
+    color: #8a6100;
+    background: #fff8e6;
+  }
+
+  /* 当前环境跑不了、被跳过的测试：灰色，不算失败 */
+  .result.skip {
+    color: #888;
+    background: #f6f6f6;
+  }
+
+  /* 顶部的大警告条：状态泄漏、没有断言这类「整体性」问题 */
+  .banner {
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #8a6100;
+    background: #fff8e6;
+    border-radius: 8px;
+  }
+
+  .error {
+    margin: 8px 0 0;
+    padding: 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #8a2020;
+    background: white;
+    border-radius: 6px;
+    white-space: pre-wrap;
+  }
+
+  button {
+    padding: 8px 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: white;
+    background: #2F6F45;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<h1>测试结果</h1>
+<p class="hint">每次改完功能，打开这个页面看一眼。全绿就说明原有功能没被改坏。</p>
+
+<button id="rerun">重新运行</button>
+
+<div id="summary" class="summary"></div>
+<div id="results"></div>
+
+<script>
+  // 按顺序加载脚本，每个都带上当前时间戳。
+  //
+  // 为什么要加时间戳：不加的话，浏览器（还有 Service Worker）会把旧版本的代码
+  // 缓存起来，你改完代码跑测试，读到的还是老代码，结果对不上会让你查很久。
+  // 这是开发用的页面，每次都取最新的最省心。
+  const SCRIPTS = ['../media.js', '../app.js', 'test-runner.js', 'tests.js'];
+
+  const resultsEl = document.getElementById('results');
+  const summaryEl = document.getElementById('summary');
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const element = document.createElement('script');
+      element.src = src + '?t=' + Date.now();
+      element.onload = resolve;
+      element.onerror = () => reject(new Error('加载失败：' + src));
+      document.head.appendChild(element);
+    });
+  }
+
+  // 一个一个加载，保证执行顺序（tests.js 要用到前面几个里的东西）
+  SCRIPTS.reduce(
+    (chain, src) => chain.then(() => loadScript(src)),
+    Promise.resolve()
+  ).then(() => {
+    runTests(resultsEl, summaryEl);
+
+    document.getElementById('rerun').addEventListener('click', () => {
+      runTests(resultsEl, summaryEl);
+    });
+  }).catch((error) => {
+    summaryEl.className = 'summary fail';
+    summaryEl.textContent = error.message;
+  });
+</script>
+
+</body>
+</html>

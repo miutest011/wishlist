@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<!-- 手机上按屏幕真实宽度渲染。没有这一行，iPhone 会当成电脑屏幕、把整页缩小 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>心愿单</title>
+
+<!-- PWA：让它能被「添加到主屏幕」，装出来像个 App -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#EDEFE9">
+<!-- 下面几行是 iPhone 专用的，Safari 不认 manifest 里的部分设置 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="心愿单">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app"></div>
+
+<!-- media.js 要排在 app.js 前面：app.js 一启动就会用到里面的函数。
+     新增脚本时记得同时加进 sw.js 的缓存列表（有测试盯着） -->
+<script src="media.js"></script>
+<script src="app.js"></script>
+<script>
+  initApp(document.getElementById('app'));
+
+  // 告诉浏览器：这个网站的数据请别随便清掉。
+  // 照片和视频导进来之后，相册里的原件就删了，App 里这份是唯一的一份 ——
+  // 申请到「持久存储」能大大降低被系统回收的概率。不支持的浏览器会跳过
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => undefined);
+  }
+
+  // 注册 Service Worker，让网页能离线打开。
+  // 浏览器只在 https 或者 localhost 下才允许注册，所以用 http 的局域网地址访问时
+  // 这一步会被跳过 —— 那种情况下网页照常能用，只是装不成 App、也不能离线
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((error) => {
+        console.log('Service Worker 没注册成功：', error.message);
+      });
+    });
+  }
+</script>
+
+</body>
+</html>
