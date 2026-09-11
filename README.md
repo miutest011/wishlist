@@ -77,22 +77,19 @@ python3 tools/dev-server.py
 
 ### 用 GitHub Pages 发布（免费）
 
-1. 在 [github.com/new](https://github.com/new) 建一个仓库（**Public**，免费版的 Pages 需要公开仓库）
+已经建好了：仓库是 [miutest011/wishlist](https://github.com/miutest011/wishlist)（Public），
+网址是 **https://miutest011.github.io/wishlist/** 。
 
-2. 把代码推上去（把网址换成你自己的）：
-
-```bash
-git remote add origin https://github.com/你的用户名/仓库名.git
-```
+以后改完代码，推上去就会自动更新：
 
 ```bash
-git push -u origin main
+git push
 ```
 
-3. 仓库页面点 **Settings → Pages**，Source 选 `Deploy from a branch`，
-   分支选 `main`、目录选 `/ (root)`，保存
+> 第一次发布时要在仓库页面点 **Settings → Pages**，Source 选 `Deploy from a branch`，
+> 分支选 `main`、目录选 `/ (root)`，保存，等一两分钟。
 
-4. 等一两分钟，网址会是 `https://你的用户名.github.io/仓库名/`
+代码是公开的，但**你的照片和备注不会上传**，它们只存在你自己的手机里。
 
 代码是公开的，但**你的照片和备注不会上传**，它们只存在你自己的手机里。
 
