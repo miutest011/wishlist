@@ -398,9 +398,154 @@ button {
   backdrop-filter: blur(24px) saturate(180%);
 }
 
+/* ---- 一叠（文件夹）---- */
+/* 后面垫两张纸，露出边角，看上去就是一叠照片摞在一起 */
+.folder-stack {
+  position: relative;
+  transform: rotate(var(--rot, 0deg));
+  transition: transform 160ms ease;
+  user-select: none;
+}
+
+.folder-stack:active {
+  transform: rotate(0deg) scale(0.975);
+}
+
+.stack-sheet {
+  position: absolute;
+  inset: 0;
+  background: var(--frame);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-frame);
+  box-shadow: var(--shadow-card);
+}
+
+.stack-sheet-back {
+  transform: rotate(-4.5deg) translate(-3px, 3px);
+}
+
+.stack-sheet-mid {
+  transform: rotate(3deg) translate(3px, 1px);
+}
+
+/* 一叠最上面那张。比单张多留一点白边，好写名字 */
+.card-folder {
+  position: relative;
+  padding-bottom: 30px;
+}
+
+.folder-caption {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 7px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+/* 名字写在白边上，用手写体，像真的拿笔写上去的 */
+.folder-name {
+  font-family: var(--font-title);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 文件夹里那一页，顶栏上的名字输入框 */
+.folder-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-family: var(--font-title);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  text-align: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-field);
+}
+
+.folder-name-input::placeholder {
+  font-family: var(--font-body);
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.folder-name-input:focus {
+  background: var(--field);
+  outline: none;
+}
+
+.folder-count-badge {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 详情页里「移出这一叠」那一行 */
+.row-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.text-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- 拖拽 ---- */
+/* 跟着手指走的那个副本。一定要 pointer-events: none，
+   否则它会挡在指针下面，永远找不到要放进去的那一叠 */
+.drag-ghost {
+  position: fixed;
+  z-index: 20;
+  margin: 0;
+  pointer-events: none;
+  opacity: 0.95;
+  box-shadow: 0 8px 30px rgba(20, 20, 18, 0.28);
+}
+
+/* 原地留下的那张变淡，充当占位 */
+.drag-source {
+  opacity: 0.3;
+}
+
+/* 指针正悬在它上面，松手就会放进去 */
+.drop-target .photo,
+.drop-target.card .photo {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.drop-target {
+  transform: rotate(0deg) scale(1.04);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card,
-  .fab {
+  .fab,
+  .folder-stack {
     transition: none;
   }
 }

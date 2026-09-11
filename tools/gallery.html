@@ -365,6 +365,38 @@
       await initApp(stage);
     });
 
+    // 把前三张收进一叠，用来看文件夹长什么样
+    async function seedFolder(storage, media, stage) {
+      await seed(storage, media, 6);
+      const list = JSON.parse(storage.getItem('items'));
+      list.slice(0, 3).forEach((item) => { item.folderId = 'f-1'; });
+      storage.setItem('items', JSON.stringify(list));
+      storage.setItem('folders', JSON.stringify([{
+        id: 'f-1',
+        name: '露营装备',
+        createdAt: '2026-09-11T10:00:00.000Z',
+        updatedAt: '2026-09-11T12:00:00.000Z'
+      }]));
+      await initApp(stage);
+    }
+
+    await board('一叠（文件夹）', '后面垫两张纸，名字写在白边上', async ({ storage, media, stage }) => {
+      await seedFolder(storage, media, stage);
+    });
+
+    await board('叠里面', '顶栏直接改名字，＋ 加进来的照片也留在这一叠', async ({ storage, media, stage }) => {
+      await seedFolder(storage, media, stage);
+      openFolder('f-1');
+    });
+
+    await board('拖拽中', '拖起来那张变淡，指针下面那张亮起来', async ({ storage, media, stage }) => {
+      await seed(storage, media, 6);
+      await initApp(stage);
+      const cards = stage.querySelectorAll('.card');
+      cards[0].classList.add('drag-source');
+      cards[1].classList.add('drop-target');
+    });
+
     await board('写备注', '选完照片，还没点完成', async () => {
       await importFile(fakeFile());
     });

@@ -9,7 +9,9 @@ const FIXED_NOW = '2026-09-11T10:00:00.000Z';
 function setup(data = {}) {
   const storage = createMemoryStorage();
   if (data.items) storage.setItem('items', JSON.stringify(data.items));
+  if (data.folders) storage.setItem('folders', JSON.stringify(data.folders));
   useStorage(storage);
+  useLongPressDelay(450);   // 恢复默认，免得某条测试改过之后泄漏给后面的测试
 
   const media = data.media || createMemoryMediaStore();
   useMediaStore(media);
@@ -70,6 +72,31 @@ function seedItem(media, options = {}) {
 // ---- 模拟用户操作的小工具 ----
 function click(element) {
   element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+// 模拟一次手指拖拽：按住 from → 挪到 to 的中心 → 松手。
+// 拖拽的代码把 pointermove / pointerup 挂在 document 上，所以后两步要发给 document。
+// 落点是用 elementFromPoint 找的，所以这里必须发真实坐标
+function dragOnto(from, to) {
+  const target = to.getBoundingClientRect();
+  const x = target.left + target.width / 2;
+  const y = target.top + target.height / 2;
+
+  from.dispatchEvent(new PointerEvent('pointerdown', {
+    bubbles: true, clientX: 0, clientY: 0, pointerType: 'touch'
+  }));
+
+  // 长按定时器设成 0，等一轮事件循环让它先跑完，拖拽才算真开始
+  return sleep(0).then(() => {
+    document.dispatchEvent(new PointerEvent('pointermove', {
+      bubbles: true, clientX: x, clientY: y, pointerType: 'touch'
+    }));
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }));
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function typeInto(element, text) {
@@ -310,6 +337,236 @@ test('删除前会问一句，点取消就什么都不动', async () => {
 });
 
 // ---- 项目本身的检查 ----
+
+// ---- 文件夹 ----
+
+test('把一张拖到另一张上，两张合成一叠，并直接进到叠里', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, storage, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+
+  assert(folderId, '应该建出一个文件夹');
+  assertEqual(JSON.parse(storage.getItem('items')).map((i) => i.folderId), [folderId, folderId]);
+  assertEqual(JSON.parse(storage.getItem('folders')).length, 1);
+  assert(root.querySelector('.folder-name-input'), '应该进到这一叠里，等着起名字');
+  assertEqual(cards(root).length, 2, '叠里应该有两张');
+});
+
+test('墙上显示的是一叠，不是散着的照片', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' }), seedItem(media, { id: 'w-3' })];
+  const { root, ready } = setup({ items, media });
+  await ready;
+
+  dropOnto('w-1', 'w-2');
+  closeFolder();
+
+  const stacks = [...root.querySelectorAll('.folder-stack')];
+  assertEqual(stacks.length, 1, '墙上该有一叠');
+  assertEqual(cards(root).length, 2, '一叠的封面 + 还散着的那张');
+  assert(textOf(root, '.folder-count').includes('2'), '叠上要写着里面有几张');
+});
+
+test('给一叠起的名字会存下来，写在白边上', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, storage, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  typeInto(root.querySelector('.folder-name-input'), '露营装备');
+  closeFolder();
+
+  assertEqual(JSON.parse(storage.getItem('folders'))[0].name, '露营装备');
+  assertEqual(textOf(root, '.folder-name'), '露营装备');
+  assertEqual(findFolder(folderId).name, '露营装备');
+});
+
+test('把一张拖到已有的一叠上，直接放进去', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' }), seedItem(media, { id: 'w-3' })];
+  const { root, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  closeFolder();
+  dropOnto('w-3', folderId);
+
+  assertEqual(itemsIn(folderId).length, 3);
+  assertEqual(root.querySelectorAll('.folder-stack').length, 1);
+  assertEqual(looseItems().length, 0, '墙上不该还剩散着的照片');
+});
+
+test('点一叠能进去，里面只有这一叠的照片', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' }), seedItem(media, { id: 'w-3' })];
+  const { root, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  closeFolder();
+  click(root.querySelector('.folder-stack'));
+
+  assertEqual(openFolderId, folderId);
+  assertEqual(cards(root).length, 2, '只该显示叠里那两张');
+});
+
+test('叠里不能再拖，不做文件夹套文件夹', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  const again = dropOnto('w-1', 'w-2');
+
+  assertEqual(again, null, '叠里的两张再拖不该建出新文件夹');
+  assertEqual(folders.length, 1);
+  assertEqual(itemsIn(folderId).length, 2);
+});
+
+test('在叠里点 ＋ 加的照片直接进这一叠', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { storage, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  await importFile(fakeImageFile());
+  await saveDraft();
+
+  assertEqual(itemsIn(folderId).length, 3);
+  assertEqual(JSON.parse(storage.getItem('items'))[0].folderId, folderId);
+  assertEqual(view, 'folder', '存完应该还待在这一叠里');
+});
+
+test('从叠里移出来，照片回到墙上', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' }), seedItem(media, { id: 'w-3' })];
+  const { root, storage, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  dropOnto('w-3', folderId);
+  await openDetail('w-1');
+  click(root.querySelector('.text-link'));
+
+  assertEqual(findItem('w-1').folderId, null);
+  assertEqual(itemsIn(folderId).length, 2);
+  assertEqual(JSON.parse(storage.getItem('items')).find((i) => i.id === 'w-1').folderId, null);
+});
+
+test('最后一张被移走，空掉的那叠自动消失', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, storage, ready } = setup({ items, media });
+  await ready;
+
+  const folderId = dropOnto('w-1', 'w-2');
+  moveToFolder('w-1', null);
+  moveToFolder('w-2', null);
+
+  assertEqual(folders.length, 0, '空文件夹该自己消失');
+  assertEqual(JSON.parse(storage.getItem('folders')).length, 0);
+  assertEqual(findFolder(folderId), null);
+  assertEqual(root.querySelectorAll('.folder-stack').length, 0);
+  assertEqual(cards(root).length, 2, '两张都该回到墙上');
+});
+
+test('删掉叠里最后一张，那叠也跟着消失', async () => {
+  const media = createMemoryMediaStore();
+  // 这里的变量千万别叫 items —— 会盖住 app.js 里那个同名的全局记录表，
+  // 断言就变成在查这份种子数据，永远查不出真实结果（这条测试栽过一次）
+  const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { storage, ready } = setup({ items: seeded, media });
+  await ready;
+
+  dropOnto('w-1', 'w-2');
+  await deleteItem('w-1');
+  await deleteItem('w-2');
+
+  assertEqual(folders.length, 0, '空掉的那叠该自己消失');
+  assertEqual(JSON.parse(storage.getItem('items')).length, 0, '两条记录都该删掉');
+  assertEqual(view, 'grid', '该回到墙上那一页');
+});
+
+test('记录指向一个已经不存在的文件夹时，回到墙上而不是凭空消失', async () => {
+  const media = createMemoryMediaStore();
+  const orphan = seedItem(media, { id: 'w-1' });
+  orphan.folderId = 'f-没了';
+  const { root, ready } = setup({ items: [orphan], media });
+  await ready;
+
+  assertEqual(findItem('w-1').folderId, null, '文件夹没了，这条记录该回到墙上');
+  assertEqual(cards(root).length, 1, '照片必须还看得见');
+});
+
+test('刚放过东西的那叠排在最前面', async () => {
+  const media = createMemoryMediaStore();
+  const items = [
+    seedItem(media, { id: 'w-new', createdAt: '2026-09-11T12:00:00.000Z' }),
+    seedItem(media, { id: 'w-1', createdAt: '2026-09-10T10:00:00.000Z' }),
+    seedItem(media, { id: 'w-2', createdAt: '2026-09-10T09:00:00.000Z' })
+  ];
+  const { ready } = setup({ items, media });
+  await ready;
+
+  // 建叠用的是「现在」（FIXED_NOW = 9-11 10:00），比 w-new 的 12:00 早
+  dropOnto('w-1', 'w-2');
+  closeFolder();
+
+  const entries = wallEntries();
+  assertEqual(entries[0].kind, 'item', '12 点那张最新，该排最前');
+  assertEqual(entries[1].kind, 'folder');
+});
+
+test('拖拽用的落点标记在每张照片和每一叠上', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' }), seedItem(media, { id: 'w-3' })];
+  const { root, ready } = setup({ items, media });
+  await ready;
+
+  dropOnto('w-1', 'w-2');
+  closeFolder();
+
+  const targets = [...root.querySelectorAll('[data-drop-id]')];
+  assertEqual(targets.length, 2, '一叠 + 一张散着的');
+  assert(targets.some((el) => el.classList.contains('folder-stack')), '叠也要能接住拖过来的照片');
+});
+
+test('长按拖动：手指按住、挪到另一张上松手，两张就合成一叠', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, ready } = setup({ items, media });
+  await ready;
+
+  useLongPressDelay(0);          // 不用真等半秒
+  const [first, second] = cards(root);
+  await dragOnto(first, second);
+
+  assertEqual(findItem('w-1').folderId, findItem('w-2').folderId);
+  assert(findItem('w-1').folderId, '应该已经归到同一叠里');
+  assertEqual(document.querySelectorAll('.drag-ghost').length, 0, '跟着手指那个副本要收掉');
+});
+
+test('只是点一下（没挪动）不会触发拖拽，正常进详情页', async () => {
+  const media = createMemoryMediaStore();
+  const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, ready } = setup({ items, media });
+  await ready;
+
+  useLongPressDelay(0);
+  const card = cards(root)[0];
+  card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, pointerType: 'touch' }));
+  document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  click(card);
+
+  assertEqual(folders.length, 0, '没挪动就不该建文件夹');
+  assertEqual(view, 'detail', '应该正常进了详情页');
+});
 
 // 从 style.css 里把某个选择器下面定义的颜色变量读出来，
 // 例如 readTokens(css, '[data-theme="dark"]') → { '--bg': '#0F0F0E', … }

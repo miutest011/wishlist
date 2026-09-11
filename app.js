@@ -36,12 +36,18 @@ function useNow(newNow) {
 // 一条记录长这样：
 //   { id, type: 'image' | 'video', mediaId, thumbId, duration, note, createdAt, folderId }
 // mediaId 指向原文件，thumbId 指向缩略图，两个都存在 IndexedDB 里。
-// folderId 现在永远是 null，是给以后的文件夹功能留的位置
+// folderId 是 null 表示还摊在墙上，否则表示收在哪一叠里。
+//
+// 一个文件夹长这样：
+//   { id, name, createdAt, updatedAt }
+// updatedAt 是「最后一次往里放东西」的时间，墙上按它排序，刚整理过的那叠会跑到最前面
 let items = [];
-let view = 'grid';        // 现在在哪一页：grid（宫格）/ note（写备注）/ detail（看详情）
+let folders = [];
+let view = 'grid';        // 在哪一页：grid（墙）/ folder（某一叠里）/ note（写备注）/ detail（看详情）
+let openFolderId = null;  // 正在看哪一叠
 let detailId = null;      // 正在看哪一条的详情
 let draft = null;         // 正在添加的那一条（还没保存）
-let errorText = null;     // 出错时显示在顶部的提示
+let errorText = null;     // 出错时显示在底部的提示
 let importing = false;    // 是不是正在处理刚选中的文件
 
 // 图片和视频的临时地址。key 是文件 id（缩略图用 thumbId，大图用 mediaId，
@@ -50,10 +56,12 @@ let objectUrls = new Map();
 
 function resetViewState() {
   view = 'grid';
+  openFolderId = null;
   detailId = null;
   draft = null;
   errorText = null;
   importing = false;
+  suppressNextClick = false;
 }
 
 // 把所有临时地址还给浏览器
@@ -75,6 +83,7 @@ function initApp(element) {
   appEl = element;
   releaseUrls();
   resetViewState();
+  folders = loadFolders();     // 要先读文件夹，下面校验记录时用得上
   items = loadItems();
   render();
   return loadThumbnails();
@@ -90,6 +99,11 @@ function loadItems() {
     if (!('note' in item)) item.note = '';
     if (!('duration' in item)) item.duration = null;
     if (!('folderId' in item)) item.folderId = null;
+    // 指向一个已经不存在的文件夹时，把它放回墙上。
+    // 不这么兜底的话，这条记录哪一页都进不去，等于凭空消失了
+    if (item.folderId && !folders.some((folder) => folder.id === item.folderId)) {
+      item.folderId = null;
+    }
   });
 
   return parsed;
@@ -97,6 +111,22 @@ function loadItems() {
 
 function saveItems() {
   storage.setItem('items', JSON.stringify(items));
+}
+
+function loadFolders() {
+  const saved = storage.getItem('folders');
+  const parsed = saved ? JSON.parse(saved) : [];
+
+  parsed.forEach((folder) => {
+    if (!('name' in folder)) folder.name = '';
+    if (!('updatedAt' in folder)) folder.updatedAt = folder.createdAt;
+  });
+
+  return parsed;
+}
+
+function saveFolders() {
+  storage.setItem('folders', JSON.stringify(folders));
 }
 
 // 把缩略图从数据库里取出来，变成 <img> 能用的地址
@@ -113,6 +143,32 @@ function loadThumbnails() {
 
 function findItem(id) {
   return items.find((item) => item.id === id) || null;
+}
+
+function findFolder(id) {
+  return folders.find((folder) => folder.id === id) || null;
+}
+
+// 某一叠里的照片，保持全局的顺序（最新的在前）
+function itemsIn(folderId) {
+  return items.filter((item) => item.folderId === folderId);
+}
+
+// 还摊在墙上、没归类的照片
+function looseItems() {
+  return items.filter((item) => item.folderId === null);
+}
+
+// 墙上要画的东西：文件夹和没归类的照片混在一起，最新的在前面。
+// 文件夹按「最后一次往里放东西」的时间排，所以刚整理过的那叠会浮到最上面
+function wallEntries() {
+  const entries = folders.map((folder) => ({ kind: 'folder', at: folder.updatedAt, folder: folder }));
+
+  looseItems().forEach((item) => {
+    entries.push({ kind: 'item', at: item.createdAt, item: item });
+  });
+
+  return entries.sort((a, b) => (a.at < b.at ? 1 : (a.at > b.at ? -1 : 0)));
 }
 
 function newId() {
@@ -141,7 +197,9 @@ function importFile(file) {
       type: info.type,
       thumb: info.thumb,
       duration: info.duration === undefined ? null : info.duration,
-      note: ''
+      note: '',
+      // 在某一叠里点的 ＋，就直接加进那一叠
+      folderId: view === 'folder' ? openFolderId : null
     };
     objectUrls.set('draft', URL.createObjectURL(info.thumb));
     view = 'note';
@@ -155,8 +213,9 @@ function importFile(file) {
 
 function cancelDraft() {
   releaseUrl('draft');
+  const backTo = draft && draft.folderId ? 'folder' : 'grid';
   draft = null;
-  view = 'grid';
+  view = backTo;
   render();
 }
 
@@ -168,6 +227,7 @@ function saveDraft() {
   const id = newId();
   const mediaId = 'media-' + id;
   const thumbId = 'thumb-' + id;
+  const folderId = draft.folderId;
 
   return Promise.all([
     mediaStore.save(mediaId, draft.file),
@@ -181,9 +241,14 @@ function saveDraft() {
       duration: draft.duration,
       note: draft.note.trim(),
       createdAt: nowFn().toISOString(),
-      folderId: null
+      folderId: folderId
     });
     saveItems();
+
+    if (folderId) {
+      touchFolder(folderId);
+      saveFolders();
+    }
 
     // 备注页的预览图就是缩略图，直接留着用，省一次读取
     if (objectUrls.has('draft')) {
@@ -192,7 +257,7 @@ function saveDraft() {
     }
 
     draft = null;
-    view = 'grid';
+    view = folderId ? 'folder' : 'grid';
     render();
   }).catch((error) => {
     // 最常见的是本机空间不够（视频很容易撑爆）
@@ -204,6 +269,101 @@ function saveDraft() {
       mediaStore.remove(thumbId)
     ]).catch(() => undefined);
   });
+}
+
+// ---- 文件夹 ----
+
+function touchFolder(folderId) {
+  const folder = findFolder(folderId);
+  if (folder) folder.updatedAt = nowFn().toISOString();
+}
+
+// 空文件夹自动消失 —— 墙上留一个空叠没有任何意义，
+// 还得专门做个「删文件夹」的操作才能清掉
+function dropEmptyFolder(folderId) {
+  if (!folderId) return;
+  if (itemsIn(folderId).length > 0) return;
+
+  folders = folders.filter((folder) => folder.id !== folderId);
+  if (openFolderId === folderId) {
+    openFolderId = null;
+    if (view === 'folder') view = 'grid';
+  }
+}
+
+// 把一条记录放进某一叠（folderId 传 null 就是移回墙上）
+function moveToFolder(itemId, folderId) {
+  const item = findItem(itemId);
+  if (!item) return;
+
+  const from = item.folderId;
+  item.folderId = folderId;
+  saveItems();
+
+  touchFolder(folderId);
+  dropEmptyFolder(from);
+  saveFolders();
+  render();
+}
+
+// 拖到别的东西上松手时调用。
+// 拖到另一张照片上 → 两张合成新的一叠；拖到一叠上 → 放进去。
+// 返回落进了哪个文件夹，没成功就返回 null
+function dropOnto(sourceItemId, targetId) {
+  const source = findItem(sourceItemId);
+  if (!source) return null;
+
+  const folder = findFolder(targetId);
+  if (folder) {
+    moveToFolder(source.id, folder.id);
+    return folder.id;
+  }
+
+  const target = findItem(targetId);
+  if (!target || target.id === source.id) return null;
+  // 只有都还摊在墙上的两张才合并。只要有一张已经收在某一叠里就不动 ——
+  // 否则叠里的两张一拖又能套出一个新文件夹，越理越乱
+  if (source.folderId !== null || target.folderId !== null) return null;
+
+  const created = {
+    id: 'f-' + newId(),
+    name: '',
+    createdAt: nowFn().toISOString(),
+    updatedAt: nowFn().toISOString()
+  };
+  folders.unshift(created);
+
+  target.folderId = created.id;
+  source.folderId = created.id;
+  saveItems();
+  saveFolders();
+
+  // 直接进到新的一叠里，让你顺手起个名字
+  openFolderId = created.id;
+  view = 'folder';
+  render();
+  return created.id;
+}
+
+function openFolder(folderId) {
+  if (!findFolder(folderId)) return;
+  openFolderId = folderId;
+  view = 'folder';
+  render();
+}
+
+function closeFolder() {
+  openFolderId = null;
+  view = 'grid';
+  render();
+}
+
+// 边打字边存。这里故意不重画页面，否则输入框会失去焦点
+function renameFolder(folderId, name) {
+  const folder = findFolder(folderId);
+  if (!folder) return;
+  folder.name = name.trim();
+  saveFolders();
 }
 
 // ---- 看详情、改备注、删除 ----
@@ -230,11 +390,10 @@ function closeDetail() {
   // 大图（尤其是视频）挺占内存的，离开详情页就还回去，缩略图留着
   if (item) releaseUrl(item.mediaId);
   detailId = null;
-  view = 'grid';
+  view = openFolderId ? 'folder' : 'grid';   // 从哪一叠点进来的就回哪一叠
   render();
 }
 
-// 备注边打字边存。这里故意不重画页面，否则输入框会失去焦点
 function setNote(id, text) {
   const item = findItem(id);
   if (!item) return;
@@ -249,12 +408,17 @@ function deleteItem(id) {
     return Promise.resolve();
   }
 
+  const from = item.folderId;
   items = items.filter((one) => one.id !== id);
   saveItems();
   releaseUrl(item.thumbId);
   releaseUrl(item.mediaId);
+
+  dropEmptyFolder(from);
+  saveFolders();
+
   detailId = null;
-  view = 'grid';
+  view = openFolderId ? 'folder' : 'grid';
   render();
 
   // 记录删了，文件也要删，否则会一直占着空间没人认领
@@ -262,6 +426,140 @@ function deleteItem(id) {
     mediaStore.remove(item.mediaId),
     mediaStore.remove(item.thumbId)
   ]);
+}
+
+// ---- 拖拽：把一张拖到另一张上归到一叠 ----
+// 用指针事件自己实现，因为浏览器自带的 HTML5 拖拽在手机上完全不工作。
+// 手感仿的是 iPhone 桌面挪 App：手机上按住约半秒浮起来跟着手指走，
+// 电脑上按住鼠标挪一点就开始拖，不用等。
+// 浮起来的是一个副本（ghost），原来那张留在原地变淡当占位。
+
+let longPressDelay = 450;        // 触屏上按住多久开始拖
+const MOVE_THRESHOLD = 8;        // 移动超过这么多像素就不算「按住不动」了
+const EDGE_SIZE = 70;            // 拖到离屏幕边缘这么近时自动滚动
+const EDGE_SPEED = 12;
+let suppressNextClick = false;   // 刚拖完紧跟着的那次点击要忽略掉
+
+function useLongPressDelay(ms) {  // 测试时改成 0，免得每条测试都要等半秒
+  longPressDelay = ms;
+}
+
+function autoScroll(pointerY) {
+  if (pointerY < EDGE_SIZE) {
+    window.scrollBy(0, -EDGE_SPEED);
+  } else if (pointerY > window.innerHeight - EDGE_SIZE) {
+    window.scrollBy(0, EDGE_SPEED);
+  }
+}
+
+// 指针下面是哪个可以接住的东西。ghost 设了 pointer-events: none，
+// 所以这里不会拿到那个跟着手指走的副本
+function dropTargetAt(x, y) {
+  const under = document.elementFromPoint(x, y);
+  const card = under && under.closest ? under.closest('[data-drop-id]') : null;
+  return card || null;
+}
+
+function makeDraggable(card, itemId) {
+  card.addEventListener('pointerdown', (event) => {
+    if (event.button > 0) return;   // 只响应左键
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const isTouch = event.pointerType !== 'mouse';
+
+    let dragging = false;
+    let ghost = null;
+    let timer = null;
+    let hovered = null;
+
+    function beginDrag() {
+      timer = null;
+      dragging = true;
+
+      const rect = card.getBoundingClientRect();
+      ghost = card.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      ghost.style.width = rect.width + 'px';
+      ghost.style.left = rect.left + 'px';
+      ghost.style.top = rect.top + 'px';
+      document.body.appendChild(ghost);
+
+      card.classList.add('drag-source');
+    }
+
+    function cancelLongPress() {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    }
+
+    function highlight(target) {
+      if (hovered === target) return;
+      if (hovered) hovered.classList.remove('drop-target');
+      hovered = target;
+      if (hovered) hovered.classList.add('drop-target');
+    }
+
+    if (isTouch) {
+      timer = setTimeout(beginDrag, longPressDelay);
+    }
+
+    function onPointerMove(moveEvent) {
+      const distance = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+
+      if (!dragging) {
+        if (isTouch) {
+          // 长按还没到就滑动了，说明用户是想滚页面，别抢
+          if (distance > MOVE_THRESHOLD) cancelLongPress();
+          return;
+        }
+        if (distance <= MOVE_THRESHOLD) return;
+        // 鼠标不用等长按：动一下就开始拖，这一次移动也要立刻算数，
+        // 不然手感上会「迟钝一下才跟上」
+        beginDrag();
+      }
+
+      ghost.style.transform =
+        `translate(${moveEvent.clientX - startX}px, ${moveEvent.clientY - startY}px) scale(1.06)`;
+      autoScroll(moveEvent.clientY);
+
+      const target = dropTargetAt(moveEvent.clientX, moveEvent.clientY);
+      highlight(target && target.dataset.dropId !== itemId ? target : null);
+    }
+
+    // 拖动过程中要拦住页面滚动。
+    // 这个监听必须写成 passive: false，否则浏览器不许我们拦
+    function onTouchMove(touchEvent) {
+      if (dragging) touchEvent.preventDefault();
+    }
+
+    function onPointerUp() {
+      cancelLongPress();
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
+      document.removeEventListener('touchmove', onTouchMove);
+
+      if (!dragging) return;      // 只是点了一下，交给点击事件去处理
+
+      ghost.remove();
+      card.classList.remove('drag-source');
+      const target = hovered;
+      highlight(null);
+
+      // 刚拖完紧接着会来一个 click，要拦掉，否则会误进详情页
+      suppressNextClick = true;
+
+      if (target) dropOnto(itemId, target.dataset.dropId);
+    }
+
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+  });
 }
 
 // ---- 画面 ----
@@ -323,6 +621,17 @@ function button(className, text, onClick) {
   return node;
 }
 
+// 点一下。刚拖完的那次点击要吞掉，否则松手就误进详情页
+function onTap(node, handler) {
+  node.addEventListener('click', () => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    handler();
+  });
+}
+
 function render() {
   if (!appEl) return;
   appEl.innerHTML = '';
@@ -331,6 +640,8 @@ function render() {
     appEl.appendChild(renderNotePage());
   } else if (view === 'detail') {
     appEl.appendChild(renderDetailPage());
+  } else if (view === 'folder') {
+    appEl.appendChild(renderFolderPage());
   } else {
     appEl.appendChild(renderGridPage());
   }
@@ -355,13 +666,10 @@ function renderBusy() {
   return box;
 }
 
-// 一张拍立得
-function renderCard(item) {
-  const card = element('figure', 'card');
-  card.style.setProperty('--rot', rotationFor(item.id));
-  card.dataset.id = item.id;
-
+// 照片本身（相框里的那一格）
+function renderPhoto(item) {
   const photo = element('div', 'photo');
+
   const url = objectUrls.get(item.thumbId);
   if (url) {
     const image = element('img');
@@ -377,9 +685,66 @@ function renderCard(item) {
     photo.appendChild(badge);
   }
 
-  card.appendChild(photo);
-  card.addEventListener('click', () => openDetail(item.id));
+  return photo;
+}
+
+// 一张拍立得。draggable 为真时可以拖到别的东西上归类
+function renderCard(item, draggable) {
+  const card = element('figure', 'card');
+  card.style.setProperty('--rot', rotationFor(item.id));
+  card.dataset.id = item.id;
+  card.dataset.dropId = item.id;      // 别的照片可以拖到它上面
+
+  card.appendChild(renderPhoto(item));
+  onTap(card, () => openDetail(item.id));
+  if (draggable) makeDraggable(card, item.id);
   return card;
+}
+
+// 一叠。后面垫两张纸，最上面那张是这叠里最新的照片，名字写在下方白边上
+function renderFolderCard(folder) {
+  const inside = itemsIn(folder.id);
+
+  const stack = element('div', 'folder-stack');
+  stack.dataset.dropId = folder.id;   // 照片可以直接拖进这一叠
+  stack.dataset.folderId = folder.id;
+  stack.style.setProperty('--rot', rotationFor(folder.id));
+
+  stack.appendChild(element('div', 'stack-sheet stack-sheet-back'));
+  stack.appendChild(element('div', 'stack-sheet stack-sheet-mid'));
+
+  const card = element('figure', 'card card-folder');
+  card.appendChild(inside.length > 0 ? renderPhoto(inside[0]) : element('div', 'photo'));
+
+  const caption = element('figcaption', 'folder-caption');
+  if (folder.name) caption.appendChild(element('span', 'folder-name', folder.name));
+  caption.appendChild(element('span', 'folder-count', inside.length + ' 张'));
+  card.appendChild(caption);
+
+  stack.appendChild(card);
+  onTap(stack, () => openFolder(folder.id));
+  return stack;
+}
+
+// 藏起来的选文件输入框。iPhone 上点它会弹出「照片图库 / 拍照 / 选取文件」
+function renderPicker() {
+  const picker = element('input', 'picker');
+  picker.type = 'file';
+  picker.accept = 'image/*,video/*';
+  picker.hidden = true;
+  picker.addEventListener('change', () => {
+    const file = picker.files && picker.files[0];
+    picker.value = '';   // 清空，这样下次选同一个文件也会触发
+    importFile(file);
+  });
+  return picker;
+}
+
+function renderAddButton(picker) {
+  const add = button('fab', '', () => picker.click());
+  add.setAttribute('aria-label', '添加种草');
+  add.appendChild(plusIcon());   // 画出来的加号比「＋」这个字更细、更匀
+  return add;
 }
 
 function renderGridPage() {
@@ -392,33 +757,59 @@ function renderGridPage() {
   bar.appendChild(titles);
   page.appendChild(bar);
 
-  if (items.length === 0) {
+  const entries = wallEntries();
+  if (entries.length === 0) {
     const empty = element('div', 'empty');
     empty.appendChild(element('p', 'empty-title', '还没有种草'));
     empty.appendChild(element('p', 'empty-hint', '点下面的 ＋，从相册里挑一张图或一段视频'));
     page.appendChild(empty);
   } else {
     const wall = element('div', 'wall');
-    items.forEach((item) => wall.appendChild(renderCard(item)));
+    entries.forEach((entry) => {
+      wall.appendChild(entry.kind === 'folder'
+        ? renderFolderCard(entry.folder)
+        : renderCard(entry.item, true));
+    });
     page.appendChild(wall);
   }
 
-  // 藏起来的选文件输入框。iPhone 上点它会弹出「照片图库 / 拍照 / 选取文件」
-  const picker = element('input', 'picker');
-  picker.type = 'file';
-  picker.accept = 'image/*,video/*';
-  picker.hidden = true;
-  picker.addEventListener('change', () => {
-    const file = picker.files && picker.files[0];
-    picker.value = '';   // 清空，这样下次选同一个文件也会触发
-    importFile(file);
-  });
+  const picker = renderPicker();
   page.appendChild(picker);
+  page.appendChild(renderAddButton(picker));
+  return page;
+}
 
-  const add = button('fab', '', () => picker.click());
-  add.setAttribute('aria-label', '添加种草');
-  add.appendChild(plusIcon());   // 画出来的加号比「＋」这个字更细、更匀
-  page.appendChild(add);
+// 某一叠里面。这里不能再拖 —— 不做文件夹套文件夹，越套越乱
+function renderFolderPage() {
+  const folder = findFolder(openFolderId);
+  if (!folder) {
+    view = 'grid';
+    return renderGridPage();
+  }
+
+  const page = element('div', 'page');
+
+  const bar = element('header', 'sheet-bar');
+  bar.appendChild(button('text-btn', '返回', closeFolder));
+
+  const name = element('input', 'folder-name-input');
+  name.type = 'text';
+  name.value = folder.name;
+  name.placeholder = '给这一叠起个名字';
+  name.setAttribute('aria-label', '文件夹名字');
+  name.addEventListener('input', () => renameFolder(folder.id, name.value));
+  bar.appendChild(name);
+
+  bar.appendChild(element('span', 'folder-count-badge', itemsIn(folder.id).length + ' 张'));
+  page.appendChild(bar);
+
+  const wall = element('div', 'wall');
+  itemsIn(folder.id).forEach((item) => wall.appendChild(renderCard(item, false)));
+  page.appendChild(wall);
+
+  const picker = renderPicker();
+  page.appendChild(picker);
+  page.appendChild(renderAddButton(picker));
   return page;
 }
 
@@ -516,6 +907,18 @@ function renderDetailPage() {
     ? '视频 · ' + formatDuration(item.duration)
     : '图片';
   body.appendChild(element('p', 'hint', formatDate(item.createdAt) + '添加 · ' + meta));
+
+  // 收在某一叠里的时候，给一个拿出来的口子。
+  // 手机上把一张从叠里拖出来很难拖准，做成按钮更稳
+  if (item.folderId) {
+    const folder = findFolder(item.folderId);
+    const actions = element('div', 'row-actions');
+    actions.appendChild(button('text-link', '移出「' + (folder && folder.name ? folder.name : '这一叠') + '」', () => {
+      moveToFolder(item.id, null);
+      closeDetail();
+    }));
+    body.appendChild(actions);
+  }
 
   page.appendChild(body);
   return page;
