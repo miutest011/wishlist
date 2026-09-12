@@ -1,7 +1,7 @@
 // Service Worker：把网页文件缓存到手机里，装成 App 之后离线也能打开。
 //
 // 重要：改完代码要把下面的版本号 +1，否则手机上还会用旧的缓存。
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE_NAME = `wishlist-${VERSION}`;
 
 // 需要缓存的文件。只有这几个 —— 你导进来的照片和视频存在浏览器自己的数据库里，

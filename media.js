@@ -58,7 +58,7 @@ function waitFor(element, eventName, seconds) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error('等了太久也没读出来'));
+      reject(new Error(`等 ${eventName} 等了 ${seconds} 秒也没等到`));
     }, seconds * 1000);
 
     function cleanup() {
@@ -67,7 +67,13 @@ function waitFor(element, eventName, seconds) {
       element.removeEventListener('error', onError);
     }
     function onDone() { cleanup(); resolve(); }
-    function onError() { cleanup(); reject(new Error('这个文件读不出来')); }
+    function onError() {
+      cleanup();
+      // 把浏览器给的错误码带上。4 = 这个格式解不了，
+      // 出问题时用户截个图，看一眼就知道是哪一类毛病
+      const code = element.error ? element.error.code : 0;
+      reject(new Error(code ? `解不开这个文件（错误码 ${code}）` : '这个文件读不出来'));
+    }
 
     element.addEventListener(eventName, onDone);
     element.addEventListener('error', onError);
@@ -116,27 +122,52 @@ function processImage(file) {
 function processVideo(file) {
   return withObjectUrl(file, (url) => {
     const video = document.createElement('video');
-    // iPhone 上这两个属性不能少：不静音、不加 playsinline 的话，
-    // Safari 会拒绝在后台解码，截不出封面
+    // iPhone 上这几个属性不能少：不静音、不加 playsinline 的话，
+    // Safari 会拒绝在后台解码，截不出封面。
+    // 老一点的 Safari 只认写在标签上的那种写法，所以两种都设
     video.muted = true;
     video.playsInline = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
     video.preload = 'auto';
     video.src = url;
 
+    // 必须把它放进页面里。
+    // 只在内存里 new 一个 video 元素，iPhone 上 Safari 不会给它分配解码器 ——
+    // loadeddata 永远不来，或者直接报错，表现就是「视频导入失败」。
+    // 挪到屏幕外藏着就行，但不能用 display:none 或 visibility:hidden，
+    // 那等于没进页面，白搭
+    video.style.cssText =
+      'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+    document.body.appendChild(video);
+
     return waitFor(video, 'loadeddata', 30)
       .then(() => {
+        // iPhone 上还得真的「播一下」才会把画面解出来，播起来立刻暂停。
+        // 播放被浏览器拦下来也不要紧，后面的 seek 通常照样能出帧
+        const playing = video.play();
+        return playing && playing.catch ? playing.catch(() => undefined) : undefined;
+      })
+      .then(() => {
+        video.pause();
         // 第一帧常常是黑的（还没渐入），往后跳一点点再截
         video.currentTime = Math.min(0.2, (video.duration || 1) / 2);
         return waitFor(video, 'seeked', 20);
       })
-      .then(() => toSquareThumbnail(video, video.videoWidth, video.videoHeight))
+      .then(() => {
+        if (!video.videoWidth || !video.videoHeight) {
+          throw new Error('读不到画面尺寸，这个视频的格式可能不支持');
+        }
+        return toSquareThumbnail(video, video.videoWidth, video.videoHeight);
+      })
       .then((thumb) => ({
         type: 'video',
         thumb: thumb,
         width: video.videoWidth,
         height: video.videoHeight,
         duration: isFinite(video.duration) ? video.duration : null
-      }));
+      }))
+      .finally(() => video.remove());
   });
 }
 

@@ -23,8 +23,30 @@ function setup(data = {}) {
   useFileSaver(() => Promise.resolve());
 
   const root = document.createElement('div');
+
+  // 和拖拽有关的测试要用「固定舞台」：把这一页钉在视口左上角，自己能滚。
+  // 不这么做的话，卡片的位置取决于测试页当时滚到哪儿了 ——
+  // 运行器连跑两遍，两遍的滚动位置不同，卡片有时正好贴着屏幕边缘，
+  // 结果就会一遍过一遍不过。钉住之后坐标恒定，和页面滚动无关
+  if (data.stage) {
+    root.style.cssText =
+      'position:fixed;left:0;top:0;width:390px;height:760px;overflow:auto;background:#fff;z-index:50;';
+  }
+
   document.body.appendChild(root);
-  onCleanup(() => root.remove());
+
+  onCleanup(() => {
+    // 万一某条测试在「拖到一半」的时候失败了，拖拽挂在 document 上的那几个监听
+    // 还留着，会在后面的测试里乱开枪。补一个 pointerup 让它正常收尾，
+    // 再把可能残留的副本删掉
+    try {
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    } catch (error) {
+      /* 收尾失败不该影响测试结果 */
+    }
+    document.querySelectorAll('.drag-ghost').forEach((ghost) => ghost.remove());
+    root.remove();
+  });
 
   const ready = initApp(root);
   return { root, storage, media, ready };
@@ -76,24 +98,67 @@ function click(element) {
   element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
 
-// 模拟一次手指拖拽：按住 from → 挪到 to 的中心 → 松手。
+// 模拟一次手指拖拽：按住 from 的中心 → 挪到 to 的中心 → 松手。
 // 拖拽的代码把 pointermove / pointerup 挂在 document 上，所以后两步要发给 document。
-// 落点是用 elementFromPoint 找的，所以这里必须发真实坐标
+// 起点必须是 from 的中心：浮起来那张是按「手指移动了多远」跟着走的，
+// 起点写歪了，它就落不到目标上（判定看的是它盖住了谁）
 function dragOnto(from, to) {
+  // 先把要拖的那张滚到视野中间，再量坐标。
+  // 真人也是看着东西拖的；而且贴着屏幕边缘拖会触发「自动滚动」，
+  // 页面一滚，量好的坐标就对不上了 —— 这条测试为此飘过一次
+  from.scrollIntoView({ block: 'center' });
+
+  const source = from.getBoundingClientRect();
   const target = to.getBoundingClientRect();
   const x = target.left + target.width / 2;
   const y = target.top + target.height / 2;
 
   from.dispatchEvent(new PointerEvent('pointerdown', {
-    bubbles: true, clientX: 0, clientY: 0, pointerType: 'touch'
+    bubbles: true,
+    clientX: source.left + source.width / 2,
+    clientY: source.top + source.height / 2,
+    pointerType: 'touch'
   }));
 
-  // 长按定时器设成 0，等一轮事件循环让它先跑完，拖拽才算真开始
-  return sleep(0).then(() => {
+  // 等「浮起来那张」真的出现，再往下走。
+  // 原来这里只等一轮事件循环（sleep(0)），赌的是长按定时器先跑完 ——
+  // 赌输的时候手指一动就被当成「用户想滚页面」，拖拽根本没开始，
+  // 结果就是两遍跑出来不一样。等到它出现最稳
+  return waitUntil(() => document.querySelector('.drag-ghost')).then(() => {
     document.dispatchEvent(new PointerEvent('pointermove', {
       bubbles: true, clientX: x, clientY: y, pointerType: 'touch'
     }));
+
+    // 把「移动之后、松手之前」的现场留下来。
+    // 出问题时光看结果没法查：到底是副本没跟上、还是落点没认出来
+    const ghost = document.querySelector('.drag-ghost');
+    const spot = ghost ? dropTargetAt(ghost, from.dataset.dropId) : null;
+    const diagnosis = {
+      副本位置: ghost ? ghost.getBoundingClientRect() : null,
+      副本的style: ghost ? ghost.getAttribute('style') : null,
+      副本的class: ghost ? ghost.getAttribute('class') : null,
+      高亮的: [...document.querySelectorAll('.drop-target')].map((el) => el.dataset.dropId),
+      当场算出的落点: spot ? spot.dataset.dropId : null,
+      移到: { x: Math.round(x), y: Math.round(y) }
+    };
+
     document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }));
+    return diagnosis;
+  });
+}
+
+// 一直等到 check() 为真。注意别叫 waitFor —— media.js 里已经有一个同名的全局函数，
+// 重名会把它盖掉（和「局部变量 items 盖住全局 items」是同一类坑）
+function waitUntil(check, timeout = 500) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    (function poll() {
+      if (check()) return resolve();
+      if (Date.now() - start > timeout) {
+        return reject(new Error('等了 ' + timeout + 'ms，浮起来那张一直没出现'));
+      }
+      setTimeout(poll, 5);
+    })();
   });
 }
 
@@ -653,16 +718,108 @@ test('拖拽用的落点标记在每张照片和每一叠上', async () => {
 test('长按拖动：手指按住、挪到另一张上松手，两张就合成一叠', async () => {
   const media = createMemoryMediaStore();
   const items = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
-  const { root, ready } = setup({ items, media });
+  // stage: 把这一页钉在固定位置再拖，卡片坐标才不受测试页滚动的影响
+  const { root, ready } = setup({ items, media, stage: true });
   await ready;
 
   useLongPressDelay(0);          // 不用真等半秒
   const [first, second] = cards(root);
-  await dragOnto(first, second);
+  const where = JSON.stringify({
+    第一张: first.getBoundingClientRect(),
+    第二张: second.getBoundingClientRect(),
+    滚动: window.scrollY,
+    视口高: window.innerHeight
+  });
+
+  const diagnosis = await dragOnto(first, second);
 
   assertEqual(findItem('w-1').folderId, findItem('w-2').folderId);
-  assert(findItem('w-1').folderId, '应该已经归到同一叠里');
+  // 失败时把当时的现场一起打出来 —— 这条测试和布局有关，
+  // 光说「没合并」没法查
+  assert(
+    findItem('w-1').folderId,
+    '应该已经归到同一叠里' +
+    ' · 拖之前：' + where +
+    ' · 拖的过程中：' + JSON.stringify(diagnosis)
+  );
   assertEqual(document.querySelectorAll('.drag-ghost').length, 0, '跟着手指那个副本要收掉');
+});
+
+// 造一个假的「浮起来那张」，用来单独验落点判定
+function fakeGhost(box, sourceId, offsetX = 0) {
+  const ghost = document.createElement('div');
+  ghost.dataset.dropId = sourceId;
+  ghost.style.cssText = 'position:fixed;left:' + (box.left + offsetX) + 'px;top:' + box.top +
+    'px;width:' + box.width + 'px;height:' + box.height + 'px;';
+  document.body.appendChild(ghost);
+  onCleanup(() => ghost.remove());
+  return ghost;
+}
+
+test('浮起来那张要立刻跟手，不能带过渡动画', async () => {
+  // 带动画的话，判定落点时它还在半路上，和目标没重叠，
+  // 表现就是真机上「明明盖住了却放不进去」。这个坑踩过一次
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, ready } = setup({ items: seeded, media });
+  await ready;
+
+  useLongPressDelay(0);
+  const card = cards(root)[0];
+  const box = card.getBoundingClientRect();
+  card.dispatchEvent(new PointerEvent('pointerdown', {
+    bubbles: true, clientX: box.left + 5, clientY: box.top + 5, pointerType: 'touch'
+  }));
+  await waitUntil(() => document.querySelector('.drag-ghost'));
+
+  const duration = getComputedStyle(document.querySelector('.drag-ghost')).transitionDuration;
+  document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }));
+
+  assert(
+    duration === '0s' || duration === '' || duration === 'none',
+    '副本必须立刻跟手，实测过渡时长是 ' + duration
+  );
+});
+
+test('落点看的是「盖住了谁」，不要求手指正好点在那张上', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, ready } = setup({ items: seeded, media });
+  await ready;
+
+  const second = cards(root)[1];
+  // 盖住第二张，但整体偏了一点 —— 手指所在的位置未必落在第二张上
+  const ghost = fakeGhost(second.getBoundingClientRect(), 'w-1', 8);
+
+  const target = dropTargetAt(ghost, 'w-1');
+  assert(target, '明明盖住了就该认');
+  assertEqual(target.dataset.dropId, 'w-2');
+});
+
+test('只擦过一点点不算落点，免得手一抖归错堆', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, ready } = setup({ items: seeded, media });
+  await ready;
+
+  const second = cards(root)[1];
+  const box = second.getBoundingClientRect();
+  // 只压住右边一小条
+  const ghost = fakeGhost(box, 'w-1', box.width * 0.9);
+
+  assertEqual(dropTargetAt(ghost, 'w-1'), null, '只擦了一下不该算');
+});
+
+test('详情页直接放图，不套相框（长图套框两边会露黑边）', async () => {
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' })];
+  const { root, ready } = setup({ items: seeded, media });
+  await ready;
+
+  await openDetail('w-1');
+  const stage = root.querySelector('.detail-media');
+  assert(stage.querySelector('img'), '详情页要有大图');
+  assertEqual(stage.querySelectorAll('.card').length, 0, '详情页不该再有拍立得相框');
 });
 
 test('只是点一下（没挪动）不会触发拖拽，正常进详情页', async () => {

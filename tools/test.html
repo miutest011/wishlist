@@ -1,10 +1,18 @@
 <!DOCTYPE html>
-<html lang="zh">
+<!-- 固定成浅色：下面加载了 App 的样式表，不锁的话深色模式里
+     这一页会变成黑底配深灰字，什么都看不清 -->
+<html lang="zh" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <!-- 这是开发用的页面，别让浏览器缓存它本身 -->
 <meta http-equiv="Cache-Control" content="no-store">
 <title>测试 - 心愿单</title>
+
+<!-- 把 App 真正的样式表也加载进来。
+     拖拽的落点是按「浮起来那张盖住了谁」算的，没有样式的话卡片没有正常的宽高，
+     这类和布局有关的测试就等于在另一个世界里跑，结果不作数。
+     放在下面那段 <style> 前面，这一页自己的样式仍然说了算 -->
+<link rel="stylesheet" href="../style.css?t=0">
 <style>
   body {
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;

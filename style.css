@@ -304,23 +304,25 @@ button {
   align-self: center;
 }
 
+/* 详情页不套相框。
+   套着的时候，长图按比例缩进去，两边会露出大片黑底，很难看 ——
+   点进来就是想好好看这张图，直接一张图 + 备注最清爽 */
 .detail-media {
-  display: grid;
-  place-items: center;
-  padding: 6px;
-  background: var(--frame);
-  border: 0.5px solid var(--hairline);
-  border-radius: 6px;
-  box-shadow: var(--shadow-card);
+  display: block;
 }
 
-.detail-media img,
+.detail-media img {
+  display: block;
+  width: 100%;
+  height: auto;             /* 长图就让它长，页面往下滚就是了 */
+  border-radius: 8px;
+}
+
 .detail-media video {
   display: block;
   width: 100%;
-  max-height: 62vh;
-  object-fit: contain;
-  background: #000;
+  border-radius: 8px;
+  background: #000;         /* 播放器本来就是黑底，这里留着不违和 */
 }
 
 .note-input {
@@ -589,6 +591,12 @@ button {
   pointer-events: none;
   opacity: 0.95;
   box-shadow: 0 8px 30px rgba(20, 20, 18, 0.28);
+  /* 必须关掉过渡动画。
+     副本是照片那张卡片克隆出来的，会一起继承 .card 的 transition，
+     结果就是它慢悠悠地「追」手指：判定落点的那一刻它还在半路上，
+     和目标压根没重叠 —— 表现就是「明明盖住了却放不进去，要试很久」。
+     跟手的东西不能有动画 */
+  transition: none;
 }
 
 /* 原地留下的那张变淡，充当占位 */

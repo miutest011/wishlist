@@ -602,12 +602,38 @@ function autoScroll(pointerY) {
   }
 }
 
-// 指针下面是哪个可以接住的东西。ghost 设了 pointer-events: none，
-// 所以这里不会拿到那个跟着手指走的副本
-function dropTargetAt(x, y) {
-  const under = document.elementFromPoint(x, y);
-  const card = under && under.closest ? under.closest('[data-drop-id]') : null;
-  return card || null;
+// 现在拖到哪儿了：看浮起来那张和谁重叠得最多。
+//
+// 一开始是拿手指那个点去找的（elementFromPoint），真机上经常「拖不进去」：
+// 手按住的是照片的边角，指针其实落在两张照片之间的空隙里，
+// 可眼睛看到的是浮起来那张明明已经盖住了目标 —— 判定和眼睛对不上。
+// 按重叠面积算就一致了：盖住谁最多，就放进谁
+function dropTargetAt(ghost, sourceId) {
+  const box = ghost.getBoundingClientRect();
+  let best = null;
+  let bestArea = 0;
+
+  // 只在当前这一页里找。浮起来那个副本挂在 body 上，这样也就不会被算进来
+  appEl.querySelectorAll('[data-drop-id]').forEach((candidate) => {
+    // 跳过自己 —— 原地那张和浮起来的副本都带着同一个 id
+    if (candidate.dataset.dropId === sourceId) return;
+
+    const rect = candidate.getBoundingClientRect();
+    const width = Math.min(box.right, rect.right) - Math.max(box.left, rect.left);
+    const height = Math.min(box.bottom, rect.bottom) - Math.max(box.top, rect.top);
+    if (width <= 0 || height <= 0) return;
+
+    const area = width * height;
+    // 要盖住人家四分之一以上才算，否则手一抖擦过去就归错堆了
+    if (area < rect.width * rect.height * 0.25) return;
+
+    if (area > bestArea) {
+      bestArea = area;
+      best = candidate;
+    }
+  });
+
+  return best;
 }
 
 function makeDraggable(card, itemId) {
@@ -622,20 +648,35 @@ function makeDraggable(card, itemId) {
     let ghost = null;
     let timer = null;
     let hovered = null;
+    let dragged = null;     // 真正被拖的那张（按住期间页面可能重画，得重新找）
 
     function beginDrag() {
       timer = null;
-      dragging = true;
 
-      const rect = card.getBoundingClientRect();
-      ghost = card.cloneNode(true);
+      // 按住不放的这半秒里，页面完全可能重画过（比如某张缩略图刚加载完），
+      // 那时闭包里这个 card 已经是「不在页面上的旧元素」了，
+      // 量出来的位置和大小全是 0，照它克隆出来的副本就是个看不见的小点，
+      // 怎么拖都放不进去 —— 真机上「有时候拖不进去」就是这么来的。
+      // 所以这里按 id 重新找当前页面上的那一张
+      dragged = appEl.querySelector('[data-drop-id="' + itemId + '"]') || card;
+
+      const rect = dragged.getBoundingClientRect();
+      // 连尺寸都量不到，说明这一张这会儿根本没在显示，那就别拖了，
+      // 也别造一个鬼影出来
+      if (!rect.width || !rect.height) return;
+
+      dragging = true;
+      ghost = dragged.cloneNode(true);
       ghost.classList.add('drag-ghost');
+      // 宽高都要写死。只给宽度的话，副本脱离了原来的位置，
+      // 高度会按内容重新算，和原来那张对不上 —— 落点判定看的正是它的大小
       ghost.style.width = rect.width + 'px';
+      ghost.style.height = rect.height + 'px';
       ghost.style.left = rect.left + 'px';
       ghost.style.top = rect.top + 'px';
       document.body.appendChild(ghost);
 
-      card.classList.add('drag-source');
+      dragged.classList.add('drag-source');
     }
 
     function cancelLongPress() {
@@ -673,10 +714,12 @@ function makeDraggable(card, itemId) {
 
       ghost.style.transform =
         `translate(${moveEvent.clientX - startX}px, ${moveEvent.clientY - startY}px) scale(1.06)`;
-      autoScroll(moveEvent.clientY);
 
-      const target = dropTargetAt(moveEvent.clientX, moveEvent.clientY);
-      highlight(target && target.dataset.dropId !== itemId ? target : null);
+      // 先算落点，再考虑要不要自动滚动。
+      // 反过来的话，页面已经滚走了，判定用的是滚动之后的位置，
+      // 和用户这一刻看到的画面差着一截 —— 拖到边缘附近时就会「明明盖住了却没进去」
+      highlight(dropTargetAt(ghost, itemId));
+      autoScroll(moveEvent.clientY);
     }
 
     // 拖动过程中要拦住页面滚动。
@@ -695,7 +738,7 @@ function makeDraggable(card, itemId) {
       if (!dragging) return;      // 只是点了一下，交给点击事件去处理
 
       ghost.remove();
-      card.classList.remove('drag-source');
+      if (dragged) dragged.classList.remove('drag-source');
       const target = hovered;
       highlight(null);
 
