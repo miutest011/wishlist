@@ -627,32 +627,74 @@ function autoScroll(pointerY) {
 // 手按住的是照片的边角，指针其实落在两张照片之间的空隙里，
 // 可眼睛看到的是浮起来那张明明已经盖住了目标 —— 判定和眼睛对不上。
 // 按重叠面积算就一致了：盖住谁最多，就放进谁
-function dropTargetAt(ghost, sourceId) {
-  const box = ghost.getBoundingClientRect();
-  let best = null;
-  let bestArea = 0;
+// 开始拖的那一刻，把所有能接住的东西量一遍存起来。
+//
+// 为什么要存：原来每次手指移动都要把十几张卡片重新量一遍位置，
+// 每量一次浏览器就得重算一次布局，手指快速划过时一秒几十次，画面就一顿一顿的。
+// 拖拽过程中墙本身不会变，量一次就够了。
+//
+// 存的是「文档坐标」（加上页面滚动量），这样拖到边缘自动滚动时，
+// 这份位置表依然有效。另一个好处更关键：目标被高亮时会放大一点，
+// 要是每帧重新量，它的位置就跟着变，判定会在「命中 / 不命中」之间反复横跳 ——
+// 手感上就是「明明盖住了却没高亮、松手也没反应」
+function collectDropZones(sourceId) {
+  const zones = [];
 
-  // 只在当前这一页里找。浮起来那个副本挂在 body 上，这样也就不会被算进来
+  // 只在当前这一页里找。浮起来那个副本挂在 body 上，本来也不会被选中
   appEl.querySelectorAll('[data-drop-id]').forEach((candidate) => {
     // 跳过自己 —— 原地那张和浮起来的副本都带着同一个 id
     if (candidate.dataset.dropId === sourceId) return;
 
     const rect = candidate.getBoundingClientRect();
-    const width = Math.min(box.right, rect.right) - Math.max(box.left, rect.left);
-    const height = Math.min(box.bottom, rect.bottom) - Math.max(box.top, rect.top);
+    zones.push({
+      element: candidate,
+      left: rect.left + window.scrollX,
+      top: rect.top + window.scrollY,
+      right: rect.right + window.scrollX,
+      bottom: rect.bottom + window.scrollY,
+      area: rect.width * rect.height
+    });
+  });
+
+  return zones;
+}
+
+// 浮起来那张和谁重叠得最多，就落到谁身上
+function dropTargetIn(ghost, zones) {
+  const rect = ghost.getBoundingClientRect();
+  const box = {
+    left: rect.left + window.scrollX,
+    top: rect.top + window.scrollY,
+    right: rect.right + window.scrollX,
+    bottom: rect.bottom + window.scrollY
+  };
+
+  let best = null;
+  let bestArea = 0;
+
+  zones.forEach((zone) => {
+    const width = Math.min(box.right, zone.right) - Math.max(box.left, zone.left);
+    const height = Math.min(box.bottom, zone.bottom) - Math.max(box.top, zone.top);
     if (width <= 0 || height <= 0) return;
 
     const area = width * height;
-    // 要盖住人家四分之一以上才算，否则手一抖擦过去就归错堆了
-    if (area < rect.width * rect.height * 0.25) return;
+    // 盖住人家 15% 以上才算。太严了会「明明盖住了却进不去」，
+    // 太松了手一抖擦过去就归错堆
+    if (area < zone.area * 0.15) return;
 
     if (area > bestArea) {
       bestArea = area;
-      best = candidate;
+      best = zone.element;
     }
   });
 
   return best;
+}
+
+// 现场量一遍再判定。拖拽过程中用的是上面那对函数（位置只量一次），
+// 这个留给测试和一次性的判断
+function dropTargetAt(ghost, sourceId) {
+  return dropTargetIn(ghost, collectDropZones(sourceId));
 }
 
 function makeDraggable(card, itemId) {
@@ -668,6 +710,9 @@ function makeDraggable(card, itemId) {
     let timer = null;
     let hovered = null;
     let dragged = null;     // 真正被拖的那张（按住期间页面可能重画，得重新找）
+    let zones = [];         // 开始拖时量好的落点位置，拖的过程中不再重量
+    let frame = null;       // 排队中的那一帧（用来给手指移动限流）
+    let latest = null;      // 手指最新的位置
 
     function beginDrag() {
       timer = null;
@@ -696,6 +741,7 @@ function makeDraggable(card, itemId) {
       document.body.appendChild(ghost);
 
       dragged.classList.add('drag-source');
+      zones = collectDropZones(itemId);   // 位置只在这里量一次
     }
 
     function cancelLongPress() {
@@ -731,14 +777,22 @@ function makeDraggable(card, itemId) {
         beginDrag();
       }
 
-      ghost.style.transform =
-        `translate(${moveEvent.clientX - startX}px, ${moveEvent.clientY - startY}px) scale(1.06)`;
+      // 手指移动得比屏幕刷新快得多。每来一次就重算一次，画面反而会一顿一顿，
+      // 所以只记下最新位置，真正的活儿留到下一帧统一做
+      latest = { x: moveEvent.clientX, y: moveEvent.clientY };
+      if (frame === null) frame = requestAnimationFrame(applyMove);
+    }
 
-      // 先算落点，再考虑要不要自动滚动。
-      // 反过来的话，页面已经滚走了，判定用的是滚动之后的位置，
-      // 和用户这一刻看到的画面差着一截 —— 拖到边缘附近时就会「明明盖住了却没进去」
-      highlight(dropTargetAt(ghost, itemId));
-      autoScroll(moveEvent.clientY);
+    // 一帧最多做一次：挪副本、算落点、必要时自动滚动
+    function applyMove() {
+      frame = null;
+      if (!dragging || !latest || !ghost) return;
+
+      ghost.style.transform =
+        `translate(${latest.x - startX}px, ${latest.y - startY}px) scale(1.06)`;
+
+      highlight(dropTargetIn(ghost, zones));
+      autoScroll(latest.y);
     }
 
     // 拖动过程中要拦住页面滚动。
@@ -755,6 +809,14 @@ function makeDraggable(card, itemId) {
       document.removeEventListener('touchmove', onTouchMove);
 
       if (!dragging) return;      // 只是点了一下，交给点击事件去处理
+
+      // 最后一次移动可能还排在下一帧里没做 —— 快速拖一下就松手时经常这样。
+      // 不补这一下，松手用的就是上一帧的落点，甚至根本没有落点
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+        applyMove();
+      }
 
       ghost.remove();
       if (dragged) dragged.classList.remove('drag-source');

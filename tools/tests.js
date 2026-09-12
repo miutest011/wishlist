@@ -829,6 +829,55 @@ test('落点看的是「盖住了谁」，不要求手指正好点在那张上',
   assertEqual(target.dataset.dropId, 'w-2');
 });
 
+test('落点用的是开始拖那一刻存下的位置，目标后来变形也不受影响', async () => {
+  // 高亮会让目标摆正放大。要是每帧都重新量位置，判定就会在
+  //「命中 / 不命中」之间反复横跳 —— 手感上就是「明明盖住了却没反应」。
+  //
+  // 这条测试写过两版都是假的：先用 .drop-target 类（变形带 160ms 过渡，
+  // 断言时还没动），再用内联 transform（真实卡片的位置受布局牵连）。
+  // 现在直接手写一份位置表喂给判定函数：存量版本必然命中，
+  // 换成现量就必然落空，归因跑不掉
+  const media = createMemoryMediaStore();
+  const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
+  const { root, ready } = setup({ items: seeded, media, stage: true });
+  await ready;
+
+  const target = cards(root)[1];
+  const box = target.getBoundingClientRect();
+  const ghost = fakeGhost(box, 'w-1', 8);
+
+  // 开始拖那一刻记下的位置（就是目标此刻所在的地方）
+  const zones = [{
+    element: target,
+    left: box.left + window.scrollX,
+    top: box.top + window.scrollY,
+    right: box.right + window.scrollX,
+    bottom: box.bottom + window.scrollY,
+    area: box.width * box.height
+  }];
+
+  const spot = dropTargetIn(ghost, zones);
+  assert(spot, '判定该按存下来的位置算，目标后来跑哪去了都不影响');
+  assertEqual(spot.dataset.dropId, 'w-2');
+  // 注意：判断「有没有找到落点」只能用 assert(x === null)。
+  // assertEqual 是按 JSON 比较的，DOM 元素会被序列化成 {}，
+  // 拿它跟 null 比永远不相等，拿两个不同元素比又永远相等 —— 等于没验
+
+  // 反过来确认这条测试确实咬得住：换成「目标已经挪走」的那份位置，就该找不到落点。
+  // 这里直接手写位置，不去真的搬动页面上的卡片 ——
+  // 卡片的变形带着 160ms 过渡，刚设完样式它其实还没动，量出来跟没挪一样
+  // （这个坑在这条测试上栽过两次了）
+  const movedZones = [{
+    element: target,
+    left: zones[0].left + 3000,
+    top: zones[0].top + 3000,
+    right: zones[0].right + 3000,
+    bottom: zones[0].bottom + 3000,
+    area: zones[0].area
+  }];
+  assert(dropTargetIn(ghost, movedZones) === null, '目标挪走了就该落空 —— 这正是要避免的');
+});
+
 test('只擦过一点点不算落点，免得手一抖归错堆', async () => {
   const media = createMemoryMediaStore();
   const seeded = [seedItem(media, { id: 'w-1' }), seedItem(media, { id: 'w-2' })];
@@ -840,7 +889,7 @@ test('只擦过一点点不算落点，免得手一抖归错堆', async () => {
   // 只压住右边一小条
   const ghost = fakeGhost(box, 'w-1', box.width * 0.9);
 
-  assertEqual(dropTargetAt(ghost, 'w-1'), null, '只擦了一下不该算');
+  assert(dropTargetAt(ghost, 'w-1') === null, '只擦了一下不该算');
 });
 
 test('详情页直接放图，不套相框（长图套框两边会露黑边）', async () => {

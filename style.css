@@ -604,15 +604,16 @@ button {
   opacity: 0.3;
 }
 
-/* 指针正悬在它上面，松手就会放进去 */
+/* 松手就会放进去。要一眼看得出来，所以摆正、放大、加粗描边 */
 .drop-target .photo,
 .drop-target.card .photo {
-  outline: 2px solid var(--ink);
-  outline-offset: 3px;
+  outline: 3px solid var(--ink);
+  outline-offset: 4px;
 }
 
 .drop-target {
-  transform: rotate(0deg) scale(1.04);
+  transform: rotate(0deg) scale(1.07);
+  box-shadow: 0 6px 22px rgba(20, 20, 18, 0.22);
 }
 
 @media (prefers-reduced-motion: reduce) {
