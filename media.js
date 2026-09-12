@@ -141,7 +141,10 @@ function processVideo(file) {
       'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
     document.body.appendChild(video);
 
-    return waitFor(video, 'loadeddata', 30)
+    // 只等 8 秒。等不到多半是这段视频的原件还在 iCloud 上、系统正在下载或转码，
+    // 再等下去也多半是白等 —— 上层有占位封面兜着，宁可早点退回去把视频先存下来，
+    // 也别让人干等半分钟最后还是失败
+    return waitFor(video, 'loadeddata', 8)
       .then(() => {
         // iPhone 上还得真的「播一下」才会把画面解出来，播起来立刻暂停。
         // 播放被浏览器拦下来也不要紧，后面的 seek 通常照样能出帧
@@ -152,7 +155,7 @@ function processVideo(file) {
         video.pause();
         // 第一帧常常是黑的（还没渐入），往后跳一点点再截
         video.currentTime = Math.min(0.2, (video.duration || 1) / 2);
-        return waitFor(video, 'seeked', 20);
+        return waitFor(video, 'seeked', 5);
       })
       .then(() => {
         if (!video.videoWidth || !video.videoHeight) {
@@ -168,6 +171,36 @@ function processVideo(file) {
         duration: isFinite(video.duration) ? video.duration : null
       }))
       .finally(() => video.remove());
+  });
+}
+
+// 视频截不出封面时用的占位图：浅灰底加一个播放三角。
+// 有它兜着，导入就不会因为「截不出那一帧」整个失败 ——
+// 视频本身存得下、点开也能播，只是墙上那张封面是灰的
+function makePlaceholderThumbnail() {
+  const size = 400;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+
+  const pen = canvas.getContext('2d');
+  pen.fillStyle = '#E6E6E1';
+  pen.fillRect(0, 0, size, size);
+
+  pen.fillStyle = '#9A9A93';
+  pen.beginPath();
+  pen.moveTo(size * 0.42, size * 0.36);
+  pen.lineTo(size * 0.66, size * 0.5);
+  pen.lineTo(size * 0.42, size * 0.64);
+  pen.closePath();
+  pen.fill();
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('占位封面没生成出来'))),
+      'image/jpeg',
+      0.8
+    );
   });
 }
 

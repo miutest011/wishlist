@@ -204,7 +204,25 @@ function importFile(file) {
   importing = true;
   render();
 
-  return processMediaFn(file).then((info) => {
+  const isVideo = (file.type || '').startsWith('video/');
+  let coverNote = null;
+
+  return processMediaFn(file).catch((error) => {
+    // 视频截不出封面，不该让整条导入跟着失败。
+    // 各家系统的解码限制五花八门，3 秒的小视频也可能截不出那一帧 ——
+    // 用一张占位封面照样存下来，视频本身存得下、点开也能播。
+    // 图片就不兜底了：连解码都失败的图，存下来也是打不开的
+    if (!isVideo) throw error;
+
+    coverNote = '封面没截出来（' + messageOf(error) + '），先用了张占位图。视频本身存得下，点开能播。';
+    return makePlaceholderThumbnail().then((thumb) => ({
+      type: 'video',
+      thumb: thumb,
+      width: 0,
+      height: 0,
+      duration: null
+    }));
+  }).then((info) => {
     importing = false;
     draft = {
       file: file,
@@ -217,6 +235,7 @@ function importFile(file) {
     };
     objectUrls.set('draft', URL.createObjectURL(info.thumb));
     view = 'note';
+    errorText = coverNote;      // 有就提示一句，但不拦着不让存
     render();
   }).catch((error) => {
     importing = false;

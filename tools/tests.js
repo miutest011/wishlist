@@ -312,6 +312,39 @@ test('点取消不会留下记录，也不会留下文件', async () => {
   assertEqual(media.files.size, 0);
 });
 
+test('视频截不出封面时，用占位封面照样能导入', async () => {
+  // 3 秒的小视频也可能因为系统的解码限制截不出那一帧，
+  // 这时候整条导入都失败是最糟的 —— 视频本身明明存得下
+  const { root, storage, media, ready } = setup({
+    processor: () => Promise.reject(new Error('解不开这个文件（错误码 4）'))
+  });
+  await ready;
+
+  await importFile(fakeVideoFile());
+
+  assertEqual(textOf(root, '.sheet-title'), '写点备注', '该照常进写备注那一页');
+  assert(root.querySelector('.error-banner').textContent.includes('占位图'), '要说明封面是占位的');
+
+  await saveDraft();
+
+  const saved = JSON.parse(storage.getItem('items'));
+  assertEqual(saved.length, 1, '视频该存下来');
+  assertEqual(saved[0].type, 'video');
+  assertEqual(media.files.size, 2, '原视频和占位封面都要存进去');
+});
+
+test('图片解不开时仍然报错，不会拿占位图凑数', async () => {
+  const { root, storage, ready } = setup({
+    processor: () => Promise.reject(new Error('这个格式不支持'))
+  });
+  await ready;
+
+  await importFile(fakeImageFile());
+
+  assertEqual(root.querySelector('.card.preview'), null, '不该进写备注那一页');
+  assertEqual(storage.getItem('items'), null, '连解码都失败的图，存下来也是打不开的');
+});
+
 test('文件读不出来时给出提示，不进备注页', async () => {
   const { root, ready } = setup({
     processor: () => Promise.reject(new Error('这个格式不支持'))

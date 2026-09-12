@@ -1,3 +1,6 @@
 # macOS 在每个文件夹里自动生成的系统文件，和项目无关
 .DS_Store
 launch.json
+
+# 临时放的调试素材，不进仓库
+tmp-review/
